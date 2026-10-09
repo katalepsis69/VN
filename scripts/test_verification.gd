@@ -248,18 +248,20 @@ func _init() -> void:
 	assert(meta_found, "Book shelf meta (preview/cover) failed to roundtrip!")
 	print("Book shelf meta verified")
 
-	# 3c. Textbox settings persistence: position (top/bottom) and style (wooden/flat/frameless)
+	# 3c. Textbox & Sprite settings persistence
 	manager.textbox_position = 1
 	manager.textbox_style = 2
+	manager.sprite_mode = 2
 	manager.save_settings()
 	var mgr2 := ReaderManager.new()
 	mgr2.config_path = TEST_CFG
 	mgr2.load_settings()
-	assert(mgr2.textbox_position == 1 and mgr2.textbox_style == 2, "textbox position/style failed to persist")
+	assert(mgr2.textbox_position == 1 and mgr2.textbox_style == 2 and mgr2.sprite_mode == 2, "textbox position/style/sprite_mode failed to persist")
 	manager.textbox_position = 0
 	manager.textbox_style = 0
+	manager.sprite_mode = 0
 	manager.save_settings()
-	print("Textbox settings persistence verified")
+	print("Textbox & Sprite settings persistence verified")
 
 	# 3c. Crash-safe saves: a half-written config must recover from its .bak
 	manager.save_progress("test://crash_book.txt", "Crash Test", 3, 9)

@@ -467,6 +467,17 @@ func _init() -> void:
 	assert(main.dialogue_label.get_theme_constant("outline_size") == 0, "dialogue_label outline should reset in boxed mode")
 	print("Textbox mode guard passed (top floating + frameless round-trip)")
 
+	# 4. Sprite size modes (Full Height and Screen Takeover)
+	main.manager.sprite_mode = 1
+	main._apply_sprite_layout()
+	assert(main.sprite_holder.offset_bottom == 0.0, "mode 1 sprite should reach bottom")
+	main.manager.sprite_mode = 2
+	main._apply_sprite_layout()
+	assert(main.sprite_holder.offset_bottom == 260.0, "mode 2 sprite should extend for takeover")
+	main.manager.sprite_mode = 0
+	main._apply_sprite_layout()
+	print("Sprite size modes guard passed (framed / full height / screen takeover)")
+
 	# Free the scene before quitting so no resources are reported in use at exit
 	root.remove_child(main)
 	main.free()

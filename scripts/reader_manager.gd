@@ -25,7 +25,7 @@ var sound_volume: float = 0.7
 var speaker_name: String = "Ginger"
 var reactive_expressions: bool = true
 var sprite_position: int = 1 # 0 left, 1 center, 2 right
-var sprite_portrait: bool = false
+var sprite_mode: int = 0 # 0 framed above textbox, 1 full height, 2 screen takeover
 var textbox_position: int = 0 # 0 bottom (classic), 1 top (floating)
 var textbox_style: int = 0 # 0 wooden box, 1 plain flat, 2 frameless (floating text)
 var textbox_opacity: float = 1.0
@@ -271,7 +271,7 @@ func load_settings() -> void:
 		speaker_name = "Ginger" # pre-Ginger default name; migrate once
 	reactive_expressions = cfg.get_value("settings", "reactive_expressions", reactive_expressions)
 	sprite_position = cfg.get_value("settings", "sprite_position", sprite_position)
-	sprite_portrait = cfg.get_value("settings", "sprite_portrait", sprite_portrait)
+	sprite_mode = cfg.get_value("settings", "sprite_mode", sprite_mode)
 	textbox_position = cfg.get_value("settings", "textbox_position", textbox_position)
 	textbox_flat_style = cfg.get_value("settings", "textbox_flat_style", textbox_flat_style)
 	textbox_style = cfg.get_value("settings", "textbox_style", 1 if textbox_flat_style else 0)
@@ -312,7 +312,7 @@ func save_settings() -> void:
 	cfg.set_value("settings", "speaker_name", speaker_name)
 	cfg.set_value("settings", "reactive_expressions", reactive_expressions)
 	cfg.set_value("settings", "sprite_position", sprite_position)
-	cfg.set_value("settings", "sprite_portrait", sprite_portrait)
+	cfg.set_value("settings", "sprite_mode", sprite_mode)
 	cfg.set_value("settings", "textbox_position", textbox_position)
 	cfg.set_value("settings", "textbox_style", textbox_style)
 	cfg.set_value("settings", "textbox_flat_style", textbox_style == 1)

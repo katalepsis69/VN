@@ -801,17 +801,25 @@ func _update_menu_background() -> void:
 	menu_bg_back.texture = menu_bg_rect.texture
 
 func _apply_sprite_layout() -> void:
-	# The character is sandwiched in the band between the top bar and the textbox:
-	# she never hides behind either, and the band follows the Textbox Height setting.
-	# Position: left / center / right; portrait = narrower (bust) holder.
+	# Position: left / center / right.
+	# Mode: 0 = above textbox (framed), 1 = full height (behind textbox), 2 = screen takeover (giant VN style).
 	var pos := clampi(manager.sprite_position, 0, 2)
-	var holder_w := 300.0 if manager.sprite_portrait else 520.0
+	var mode := clampi(manager.sprite_mode, 0, 2)
+	var holder_w: float
+	match mode:
+		1:
+			holder_w = 680.0
+		2:
+			holder_w = 760.0
+		_:
+			holder_w = 520.0
+
 	match pos:
 		0:
 			sprite_holder.anchor_left = 0.0
 			sprite_holder.anchor_right = 0.0
-			sprite_holder.offset_left = 40.0
-			sprite_holder.offset_right = 40.0 + holder_w
+			sprite_holder.offset_left = 20.0 if mode > 0 else 40.0
+			sprite_holder.offset_right = sprite_holder.offset_left + holder_w
 		1:
 			sprite_holder.anchor_left = 0.5
 			sprite_holder.anchor_right = 0.5
@@ -820,17 +828,29 @@ func _apply_sprite_layout() -> void:
 		2:
 			sprite_holder.anchor_left = 1.0
 			sprite_holder.anchor_right = 1.0
-			sprite_holder.offset_left = -40.0 - holder_w
-			sprite_holder.offset_right = -40.0
+			sprite_holder.offset_right = -20.0 if mode > 0 else -40.0
+			sprite_holder.offset_left = sprite_holder.offset_right - holder_w
+
 	sprite_holder.anchor_top = 0.0
 	sprite_holder.anchor_bottom = 1.0
-	if manager.textbox_position == 1:
-		var top_gap: float = float(mini(manager.textbox_height, 180)) if manager.textbox_style == 2 else float(manager.textbox_height)
-		sprite_holder.offset_top = TOP_BAR_H + 8.0 + top_gap + TEXTBOX_GAP
-		sprite_holder.offset_bottom = -10.0
+
+	if mode == 1:
+		# Full Height: grounded at the bottom of the screen, extending behind the textbox
+		sprite_holder.offset_top = TOP_BAR_H + 4.0
+		sprite_holder.offset_bottom = 0.0
+	elif mode == 2:
+		# Screen Takeover: character dominates the scene, lower body extends behind textbox
+		sprite_holder.offset_top = TOP_BAR_H
+		sprite_holder.offset_bottom = 260.0
 	else:
-		sprite_holder.offset_top = TOP_BAR_H + 8.0
-		sprite_holder.offset_bottom = -(float(manager.textbox_height) + TEXTBOX_GAP)
+		# Framed above textbox (default)
+		if manager.textbox_position == 1:
+			var top_gap: float = float(mini(manager.textbox_height, 180)) if manager.textbox_style == 2 else float(manager.textbox_height)
+			sprite_holder.offset_top = TOP_BAR_H + 8.0 + top_gap + TEXTBOX_GAP
+			sprite_holder.offset_bottom = -10.0
+		else:
+			sprite_holder.offset_top = TOP_BAR_H + 8.0
+			sprite_holder.offset_bottom = -(float(manager.textbox_height) + TEXTBOX_GAP)
 
 func _apply_reactive_mood(text: String) -> void:
 	var mood := MoodMapper.mood_for(text)
@@ -2484,17 +2504,28 @@ func _tab_appearance_and_character() -> void:
 	)
 	g.add_child(char_pos_opt)
 
-	var portrait_lbl := Label.new()
-	portrait_lbl.text = "Portrait Mode (bust only):"
-	g.add_child(portrait_lbl)
-	var portrait_check := CheckBox.new()
-	portrait_check.button_pressed = manager.sprite_portrait
-	portrait_check.toggled.connect(func(t: bool):
-		manager.sprite_portrait = t
+	var char_size_lbl := Label.new()
+	char_size_lbl.text = "Character Size:"
+	g.add_child(char_size_lbl)
+	var char_size_opt := OptionButton.new()
+	char_size_opt.add_item("Above Textbox (framed)")
+	char_size_opt.add_item("Full Height (behind textbox)")
+	char_size_opt.add_item("Screen Takeover (giant VN style)")
+	char_size_opt.selected = clampi(manager.sprite_mode, 0, 2)
+	char_size_opt.item_selected.connect(func(id: int):
+		manager.sprite_mode = id
 		manager.save_settings()
 		_apply_sprite_layout()
 	)
-	g.add_child(portrait_check)
+	g.add_child(char_size_opt)
+
+	var cs_blank := Control.new()
+	g.add_child(cs_blank)
+	var cs_hint := Label.new()
+	cs_hint.text = "Screen Takeover lets the character dominate the scene, extending behind the textbox."
+	cs_hint.add_theme_color_override("font_color", Color(0.72, 0.68, 0.60))
+	cs_hint.add_theme_font_size_override("font_size", 12)
+	g.add_child(cs_hint)
 
 	_add_toggle_setting(g, "Speaker Bounce on Speech:", manager.character_bounce, func(toggled: bool):
 		manager.character_bounce = toggled
