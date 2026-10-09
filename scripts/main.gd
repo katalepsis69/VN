@@ -1501,7 +1501,7 @@ func _build_main_menu() -> void:
 	update_banner.add_child(banner_hbox)
 
 	update_label = Label.new()
-	update_label.text = "✨ A new version is available!"
+	update_label.text = "A new version is available!"
 	update_label.add_theme_font_size_override("font_size", 13)
 	banner_hbox.add_child(update_label)
 
@@ -3618,7 +3618,7 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 
 func _on_update_checked(has_update: bool, latest_ver: String, _notes: String, _download_url: String, _html_url: String) -> void:
 	if has_update and update_banner != null:
-		update_label.text = "✨ VN Reader %s is available!" % latest_ver
+		update_label.text = "VN Reader %s is available!" % latest_ver
 		update_banner.visible = true
 	if settings_update_status != null:
 		if has_update:
