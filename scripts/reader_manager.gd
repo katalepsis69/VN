@@ -11,7 +11,7 @@ const SHELF_CAP := 200 # shelf rows kept; progress for older books survives on d
 
 var typewriter_speed: float = 45.0
 var font_size: int = 24
-var sentences_per_slide: int = 2
+var sentences_per_slide: int = 2 # original default: 2 sentences (synced with 260 px textbox height)
 var auto_delay: float = 3.0
 
 var bg_change_freq: int = 4
@@ -66,9 +66,12 @@ func _normalize_path(path: String) -> String:
 func _load_config() -> ConfigFile:
 	var cfg := ConfigFile.new()
 	if not FileAccess.file_exists(config_path):
+		_migrate_legacy_data(cfg)
 		return cfg # first run (or a fresh test scratch): nothing to load
 	if cfg.load(config_path) == OK:
 		_prune_orphan_entries(cfg)
+		_migrate_legacy_data(cfg)
+		_sync_book_progress(cfg)
 		return cfg
 	if FileAccess.file_exists(config_path + BACKUP_SUFFIX):
 		var bak := ConfigFile.new()
@@ -76,9 +79,97 @@ func _load_config() -> ConfigFile:
 			# main file is corrupt; keep the backup's content and rewrite main from it
 			bak.save(config_path)
 			recovery_note = "A partially saved settings file was found and repaired from its backup.\nThe last slide you were on may be one step behind."
+			_migrate_legacy_data(bak)
+			_sync_book_progress(bak)
 			return bak
 	push_error("Settings file unreadable: " + config_path)
 	return cfg # corrupt with no backup: start empty rather than crash
+
+func _migrate_legacy_data(cfg: ConfigFile) -> void:
+	if config_path.contains("test_config"):
+		return
+	var user_base := OS.get_user_data_dir().get_base_dir()
+	var legacy_dir := user_base.path_join("ADHDVNREADER")
+	var legacy_cfg_path := legacy_dir.path_join("reader_config.cfg").replace("\\", "/")
+	if not FileAccess.file_exists(legacy_cfg_path):
+		return
+	var legacy_cfg := ConfigFile.new()
+	if legacy_cfg.load(legacy_cfg_path) != OK:
+		return
+	var changed := false
+	var rec_list: PackedStringArray = cfg.get_value("recent", "file_list", PackedStringArray())
+	for sec in legacy_cfg.get_sections():
+		var s := String(sec)
+		if s.begins_with("doc_"):
+			var p := String(legacy_cfg.get_value(s, "path", ""))
+			if p.is_empty():
+				continue
+			var target_sec := "doc_" + p.md5_text()
+			if not cfg.has_section(target_sec):
+				for k in legacy_cfg.get_section_keys(s):
+					cfg.set_value(target_sec, k, legacy_cfg.get_value(s, k))
+				if FileAccess.file_exists(p) and not rec_list.has(p):
+					rec_list.append(p)
+				changed = true
+				var cover_name := p.md5_text() + ".png"
+				var old_cover := legacy_dir.path_join("covers").path_join(cover_name).replace("\\", "/")
+				var new_cover := "user://covers/" + cover_name
+				if FileAccess.file_exists(old_cover) and not FileAccess.file_exists(new_cover):
+					var dir := DirAccess.open("user://")
+					if dir:
+						dir.make_dir_recursive("covers")
+					DirAccess.copy_absolute(old_cover, new_cover)
+	if changed:
+		cfg.set_value("recent", "file_list", rec_list)
+		_save_config(cfg)
+
+func _sync_book_progress(cfg: ConfigFile) -> void:
+	if config_path.contains("test_config"):
+		return
+	var sections := cfg.get_sections()
+	var book_by_name := {}
+	for sec in sections:
+		var s := String(sec)
+		if s.begins_with("doc_"):
+			var p := String(cfg.get_value(s, "path", ""))
+			var fname := p.get_file().to_lower()
+			if fname.is_empty():
+				continue
+			if not book_by_name.has(fname):
+				book_by_name[fname] = []
+			book_by_name[fname].append({
+				"sec": s,
+				"path": p,
+				"slide": int(cfg.get_value(s, "slide_index", 0)),
+				"total": int(cfg.get_value(s, "total_slides", 0)),
+				"timestamp": float(cfg.get_value(s, "timestamp", 0)),
+				"preview": String(cfg.get_value(s, "preview", "")),
+				"cover": String(cfg.get_value(s, "cover", "")),
+			})
+	var changed := false
+	var rec_list: PackedStringArray = cfg.get_value("recent", "file_list", PackedStringArray())
+	for fname in book_by_name:
+		var entries: Array = book_by_name[fname]
+		if entries.size() > 1:
+			var best: Dictionary = entries[0]
+			for e in entries:
+				if e["slide"] > best["slide"]:
+					best = e
+			for e in entries:
+				if e["slide"] < best["slide"]:
+					cfg.set_value(e["sec"], "slide_index", best["slide"])
+					cfg.set_value(e["sec"], "total_slides", best["total"])
+					cfg.set_value(e["sec"], "timestamp", best["timestamp"])
+					if not best["preview"].is_empty():
+						cfg.set_value(e["sec"], "preview", best["preview"])
+					if not best["cover"].is_empty():
+						cfg.set_value(e["sec"], "cover", best["cover"])
+					changed = true
+					if e["path"].to_lower().contains("/my books/") and not best["path"].to_lower().contains("/my books/"):
+						rec_list.erase(best["path"])
+	if changed:
+		cfg.set_value("recent", "file_list", rec_list)
+		_save_config(cfg)
 
 ## A file_list row without a matching doc_ section is unreadable progress: either
 ## a legacy clipboard:// entry (never resumable) or a save cut before the section
@@ -143,12 +234,28 @@ func _save_config(cfg: ConfigFile) -> void:
 	if rename_err != OK:
 		push_error("Settings save failed at final step: error %d" % rename_err)
 
+func set_textbox_height(h: int) -> void:
+	textbox_height = clampi(h, 160, 400)
+	sentences_per_slide = TextParser.sentences_for_height(textbox_height)
+
+func set_sentences_per_slide(s: int) -> void:
+	sentences_per_slide = clampi(s, 1, 5)
+	textbox_height = TextParser.height_for_sentences(sentences_per_slide)
+
+func get_slide_capacity() -> Dictionary:
+	var sents := clampi(sentences_per_slide, 1, 5) if sentences_per_slide > 0 else TextParser.sentences_for_height(textbox_height)
+	var chars := TextParser.max_chars_for_height(textbox_height)
+	return {"sentences": sents, "max_chars": chars}
+
 func load_settings() -> void:
 	var cfg := _load_config()
 
 	typewriter_speed = cfg.get_value("settings", "typewriter_speed", typewriter_speed)
 	font_size = cfg.get_value("settings", "font_size", font_size)
-	sentences_per_slide = cfg.get_value("settings", "sentences_per_slide", sentences_per_slide)
+	textbox_height = cfg.get_value("settings", "textbox_height", textbox_height)
+	sentences_per_slide = cfg.get_value("settings", "sentences_per_slide", TextParser.sentences_for_height(textbox_height))
+	if sentences_per_slide <= 0:
+		sentences_per_slide = TextParser.sentences_for_height(textbox_height)
 	auto_delay = cfg.get_value("settings", "auto_delay", auto_delay)
 
 	bg_change_freq = cfg.get_value("settings", "bg_change_freq", bg_change_freq)

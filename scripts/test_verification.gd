@@ -445,5 +445,28 @@ func _init() -> void:
 		assert(not UpdaterScript.is_remote_newer("1.0", "1.1"), "1.0 should not be newer than 1.1")
 		print("2-digit version comparison verified: v1.1 > 1.0, 2.0 > 1.9, v1.0 == 1.0")
 
+	# 8. Dynamic Textbox Height Capacity & Text Scaling
+	var cap_low := TextParser.capacity_for_height(160)
+	assert(cap_low["sentences"] == 1 and cap_low["max_chars"] == 180, "160px height should give 1 sentence, 180 chars")
+	var cap_mid := TextParser.capacity_for_height(260)
+	assert(cap_mid["sentences"] == 2 and cap_mid["max_chars"] == 322, "260px height should give 2 sentences (default), 322 chars")
+	var cap_high := TextParser.capacity_for_height(400)
+	assert(cap_high["sentences"] == 5 and cap_high["max_chars"] == 520, "400px height should give 5 sentences, 520 chars")
+
+	# Test bidirectional sync between sentences and height
+	assert(TextParser.sentences_for_height(160) == 1, "160px should map to 1 sentence")
+	assert(TextParser.sentences_for_height(260) == 2, "260px should map to 2 sentences (default)")
+	assert(TextParser.sentences_for_height(400) == 5, "400px should map to 5 sentences")
+	assert(TextParser.height_for_sentences(1) == 160, "1 sentence should map to 160px")
+	assert(TextParser.height_for_sentences(2) == 260, "2 sentences should map to 260px (default)")
+	assert(TextParser.height_for_sentences(5) == 400, "5 sentences should map to 400px")
+
+	var passage := "First sentence is short. Second sentence describes the scene. Third sentence adds some more color to the passage. Fourth sentence continues the thought smoothly. Fifth sentence wraps up the whole paragraph."
+	var slides_compact := TextParser.parse_string(passage, cap_low["sentences"], [], cap_low["max_chars"])
+	var slides_tall := TextParser.parse_string(passage, cap_high["sentences"], [], cap_high["max_chars"])
+	assert(slides_compact.size() == 5, "Compact height (1 sentence) should produce 5 slides")
+	assert(slides_tall.size() == 1, "Tall height should pack all 5 sentences into 1 slide")
+	print("Dynamic textbox capacity verified: 160px -> %d slides, 400px -> %d slide(s)" % [slides_compact.size(), slides_tall.size()])
+
 	print("--- All Headless Verifications Passed! ---")
 	quit()

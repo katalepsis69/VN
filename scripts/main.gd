@@ -65,6 +65,8 @@ var nameplate_panel: PanelContainer
 var nameplate_label: Label
 var dialogue_label: RichTextLabel
 var next_arrow: TextureRect
+var _last_parsed_cap: Dictionary = {}
+var _raw_clipboard_text: String = ""
 
 var menu_overlay: Control
 var settings_overlay: PanelContainer
@@ -459,15 +461,20 @@ func _continue_reading() -> void:
 		if total > 0 and start >= total - 1:
 			var bs: int = int(item.get("book_start", -1))
 			start = bs if bs > 0 else 0
-		load_document(p, start)
+		load_document(p, start, total if start < total - 1 else -1)
 		return
 	if candidates.is_empty() and FileAccess.file_exists("res://assets/sample_paper.txt"):
 		load_document("res://assets/sample_paper.txt", 0)
 		return
 	OS.alert("The last document could not be found. It may have been moved, renamed, or deleted.\n\nOpen a document from the menu to start reading.", "File Not Found")
 
-func load_document(path: String, start_slide: int = 0) -> void:
-	var parsed := TextParser.parse_file_with_images(path, manager.sentences_per_slide)
+func _height_capacity_desc(h: int) -> String:
+	var s := TextParser.sentences_for_height(h)
+	return "%d sentence%s" % [s, "" if s == 1 else "s"]
+
+func load_document(path: String, start_slide: int = 0, saved_total: int = -1) -> void:
+	var cap := manager.get_slide_capacity()
+	var parsed := TextParser.parse_file_with_images(path, cap["sentences"], cap["max_chars"])
 	var parsed_slides: Array[String] = parsed["slides"]
 	if parsed_slides.is_empty():
 		OS.alert("No readable text was found in:\n" + path + "\n\nThe file may be empty, locked, or in an unsupported format.", "Could Not Read Document")
@@ -478,6 +485,7 @@ func load_document(path: String, start_slide: int = 0) -> void:
 	chapter_list = parsed["chapters"]
 	book_start_slide = parsed["book_start"]
 	_slide_img_cache.clear()
+	_last_parsed_cap = cap
 	_img_showing = false
 	_img_hold = 0
 	current_doc_path = path
@@ -485,6 +493,11 @@ func load_document(path: String, start_slide: int = 0) -> void:
 	doc_title_label.text = current_doc_title
 	doc_title_label.tooltip_text = current_doc_title
 	_save_book_meta()
+
+	# Scale start_slide if saved_total differs from current parsed slide count
+	if saved_total > 0 and saved_total != parsed_slides.size() and start_slide > 0:
+		var ratio := float(start_slide) / float(saved_total)
+		start_slide = clampi(int(round(ratio * float(parsed_slides.size()))), 0, parsed_slides.size() - 1)
 	
 	current_slide_idx = clampi(start_slide, 0, slides.size() - 1)
 	slides_since_bg = 0
@@ -494,6 +507,58 @@ func load_document(path: String, start_slide: int = 0) -> void:
 	_display_current_slide()
 	_update_background(true)
 	_update_sprite(true)
+
+func _sync_book_to_textbox_height() -> void:
+	if current_doc_path.is_empty() or slides.is_empty():
+		return
+	var cap := manager.get_slide_capacity()
+	if _last_parsed_cap.get("sentences", -1) == cap["sentences"] and _last_parsed_cap.get("max_chars", -1) == cap["max_chars"]:
+		return
+
+	var anchor := ""
+	if current_slide_idx >= 0 and current_slide_idx < slides.size():
+		var raw_s: String = slides[current_slide_idx].strip_edges()
+		anchor = raw_s.substr(0, mini(40, raw_s.length()))
+
+	var new_slides: Array[String] = []
+	var new_images: Dictionary = {}
+	var new_chapters: Array = []
+	var new_book_start: int = -1
+
+	if current_doc_path.begins_with("clipboard://"):
+		if not _raw_clipboard_text.is_empty():
+			var heur: Array = []
+			new_slides = TextParser.parse_string(_raw_clipboard_text, cap["sentences"], heur, cap["max_chars"])
+			new_chapters = heur
+			new_book_start = TextParser.find_book_start(new_slides)
+	else:
+		var parsed := TextParser.parse_file_with_images(current_doc_path, cap["sentences"], cap["max_chars"])
+		new_slides = parsed["slides"]
+		new_images = parsed["images"]
+		new_chapters = parsed["chapters"]
+		new_book_start = parsed["book_start"]
+
+	if new_slides.is_empty():
+		return
+
+	var new_idx := -1
+	if not anchor.is_empty():
+		for i in new_slides.size():
+			if new_slides[i].contains(anchor):
+				new_idx = i
+				break
+	if new_idx == -1:
+		var ratio := float(current_slide_idx) / float(maxi(1, slides.size() - 1))
+		new_idx = clampi(int(round(ratio * float(new_slides.size() - 1))), 0, new_slides.size() - 1)
+
+	slides = new_slides
+	slide_images = new_images
+	chapter_list = new_chapters
+	book_start_slide = new_book_start
+	_slide_img_cache.clear()
+	_last_parsed_cap = cap
+	current_slide_idx = new_idx
+	_display_current_slide()
 
 func _save_book_meta() -> void:
 	# Once per document open: stash the first real sentence (after Gutenberg
@@ -529,8 +594,10 @@ func _save_cover_png(tex: Texture2D) -> String:
 	return path
 
 func load_raw_text(text: String, title: String = "Pasted Text") -> void:
+	_raw_clipboard_text = text
+	var cap := manager.get_slide_capacity()
 	var heur: Array = []
-	var parsed_slides := TextParser.parse_string(text, manager.sentences_per_slide, heur)
+	var parsed_slides := TextParser.parse_string(text, cap["sentences"], heur, cap["max_chars"])
 	if parsed_slides.is_empty():
 		return
 
@@ -539,6 +606,7 @@ func load_raw_text(text: String, title: String = "Pasted Text") -> void:
 	chapter_list = heur
 	book_start_slide = TextParser.find_book_start(parsed_slides)
 	_slide_img_cache.clear()
+	_last_parsed_cap = cap
 	_img_showing = false
 	_img_hold = 0
 	current_doc_path = "clipboard://" + title
@@ -1042,13 +1110,39 @@ func _my_books() -> Array[Dictionary]:
 	while not fname.is_empty():
 		if not dir.current_is_dir() and not fname.begins_with("."):
 			if fname.get_extension().to_lower() in TextParser.SUPPORTED_EXTENSIONS:
+				var full_path := dir_path.path_join(fname)
+				var cover := ""
+				var cpath := "user://covers/" + full_path.md5_text() + ".png"
+				if FileAccess.file_exists(cpath):
+					cover = cpath
+				elif fname.get_extension().to_lower() == "epub":
+					cover = _extract_and_cache_epub_cover(full_path)
 				out.append({
-					"path": dir_path.path_join(fname), "title": fname.get_basename(),
+					"path": full_path, "title": fname.get_basename(),
 					"slide_index": 0, "total_slides": 0, "timestamp": 0,
-					"preview": "", "cover": "",
+					"preview": "", "cover": cover,
 				})
 		fname = dir.get_next()
 	return out
+
+func _extract_and_cache_epub_cover(path: String) -> String:
+	var out_path := "user://covers/" + path.md5_text() + ".png"
+	if FileAccess.file_exists(out_path):
+		return out_path
+	var img := TextParser.probe_epub_cover_image(path)
+	if img == null:
+		return ""
+	var dir := DirAccess.open("user://")
+	if dir:
+		dir.make_dir_recursive("covers")
+	img.decompress()
+	if img.get_height() > 300:
+		var nw := int(float(img.get_width()) * 300.0 / float(img.get_height()))
+		img.resize(nw, 300, Image.INTERPOLATE_LANCZOS)
+	var err := img.save_png(out_path)
+	if err == OK:
+		return out_path
+	return ""
 
 ## My Books mirrors the folder: a book deleted from disk leaves the shelf, and
 ## with it goes its stored progress and generated cover.
@@ -1670,10 +1764,10 @@ func _build_main_menu() -> void:
 	vbox.add_child(shelf_panel)
 
 	var shelf_margin := MarginContainer.new()
-	shelf_margin.add_theme_constant_override("margin_left", 16)
-	shelf_margin.add_theme_constant_override("margin_right", 16)
-	shelf_margin.add_theme_constant_override("margin_top", 16)
-	shelf_margin.add_theme_constant_override("margin_bottom", 10)
+	shelf_margin.add_theme_constant_override("margin_left", 32)
+	shelf_margin.add_theme_constant_override("margin_right", 32)
+	shelf_margin.add_theme_constant_override("margin_top", 14)
+	shelf_margin.add_theme_constant_override("margin_bottom", 12)
 	shelf_panel.add_child(shelf_margin)
 
 	var shelf_scroll := ScrollContainer.new()
@@ -1686,8 +1780,10 @@ func _build_main_menu() -> void:
 	shelf_margin.add_child(shelf_scroll)
 
 	var row_margin := MarginContainer.new()
+	row_margin.add_theme_constant_override("margin_left", 8)
+	row_margin.add_theme_constant_override("margin_right", 8)
 	row_margin.add_theme_constant_override("margin_top", 18)
-	row_margin.add_theme_constant_override("margin_bottom", 2)
+	row_margin.add_theme_constant_override("margin_bottom", 6)
 	row_margin.size_flags_horizontal = SIZE_EXPAND_FILL
 	row_margin.size_flags_vertical = SIZE_EXPAND_FILL
 	shelf_scroll.add_child(row_margin)
@@ -1891,7 +1987,7 @@ func _make_book_spine(item: Dictionary, idx: int, animate_drop: bool) -> Button:
 	)
 	spine.pressed.connect(func():
 		if FileAccess.file_exists(path):
-			load_document(path, item.slide_index)
+			load_document(path, item.slide_index, item.total_slides)
 		else:
 			OS.alert("File not found:\n" + path + "\n\nIt may have been moved or deleted. You can remove it from Bookmarks & Recent.", "File Not Found")
 	)
@@ -2028,6 +2124,8 @@ func _show_spot(spot: Dictionary) -> void:
 		spot_cover.remove_child(c)
 		c.queue_free()
 	var cover_path := str(spot.get("cover", ""))
+	if cover_path == "" and path.get_extension().to_lower() == "epub":
+		cover_path = _extract_and_cache_epub_cover(path)
 	var cover_tex: Texture2D = null
 	if cover_path != "":
 		# keyed by path; bounded by the shelf cap. Cached as a texture so hovering
@@ -2045,29 +2143,39 @@ func _show_spot(spot: Dictionary) -> void:
 		spot_cover.add_child(tr)
 	else:
 		# Generated cover: title initial on the book's spine color
-		var gen := Panel.new()
+		var gen := PanelContainer.new()
 		var col := _spine_color(spot.path)
 		var sbg := StyleBoxFlat.new()
 		sbg.bg_color = col
 		sbg.border_color = col.darkened(0.3)
 		sbg.set_border_width_all(1)
+		sbg.set_corner_radius_all(4)
+		sbg.content_margin_left = 8.0
+		sbg.content_margin_right = 8.0
+		sbg.content_margin_top = 10.0
+		sbg.content_margin_bottom = 10.0
 		gen.add_theme_stylebox_override("panel", sbg)
+		gen.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 		spot_cover.add_child(gen)
 		var gv := VBoxContainer.new()
 		gv.alignment = BoxContainer.ALIGNMENT_CENTER
-		gv.add_theme_constant_override("separation", 4)
+		gv.size_flags_vertical = SIZE_EXPAND_FILL
+		gv.add_theme_constant_override("separation", 6)
 		gen.add_child(gv)
 		var letter := Label.new()
 		letter.text = str(spot.title).substr(0, 1).to_upper()
 		letter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		letter.add_theme_font_size_override("font_size", 46)
+		letter.add_theme_font_size_override("font_size", 42)
+		letter.add_theme_color_override("font_color", WOOD_INK)
 		gv.add_child(letter)
 		var name_lbl := Label.new()
 		name_lbl.text = spot.title
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", WOOD_INK_DIM)
 		name_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		name_lbl.custom_minimum_size = Vector2(100, 0)
+		name_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		name_lbl.max_lines_visible = 3
 		gv.add_child(name_lbl)
 
 func _spine_color(path: String, missing := false) -> Color:
@@ -2177,9 +2285,23 @@ func _tab_reading_and_sound() -> void:
 	_add_slider_setting(g, "Typewriter Speed (chars/sec, 120 = instant):", 15, 120, manager.typewriter_speed, func(val: float):
 		manager.typewriter_speed = val
 	)
-	_add_slider_setting(g, "Sentences per Slide:", 1, 3, float(manager.sentences_per_slide), func(val: float):
-		manager.sentences_per_slide = int(val)
+	_add_slider_setting(g, "Max Sentences per Slide:", 1, 5, float(manager.sentences_per_slide), func(val: float):
+		manager.set_sentences_per_slide(int(val))
+		_apply_textbox_layout()
+		_apply_sprite_layout()
+		_refit_current_slide()
+	, 1.0, func(v: float) -> String:
+		var iv := int(v)
+		var def_str := " (Default)" if iv == 2 else ""
+		return "%d (%d px box)%s" % [iv, TextParser.height_for_sentences(iv), def_str]
 	)
+	var s_blank := Control.new()
+	g.add_child(s_blank)
+	var s_hint := Label.new()
+	s_hint.text = "Up to this many sentences per slide (dialogue and paragraph breaks end early). Original default: 2."
+	s_hint.add_theme_color_override("font_color", Color(0.72, 0.68, 0.60))
+	s_hint.add_theme_font_size_override("font_size", 12)
+	g.add_child(s_hint)
 	_add_slider_setting(g, "Auto-Advance Delay (seconds):", 1.0, 10.0, manager.auto_delay, func(val: float):
 		manager.auto_delay = val
 	, 0.5)
@@ -2237,6 +2359,9 @@ func _tab_appearance_and_character() -> void:
 		manager.save_settings()
 		_look = _current_look()
 		_apply_theme()
+		_select_settings_tab(_settings_tab)
+		_populate_book_shelf(false)
+		_update_menu_background()
 	)
 	g.add_child(look_opt)
 
@@ -2263,7 +2388,7 @@ func _tab_appearance_and_character() -> void:
 			if custom_ui_items[ci]["name"] == manager.custom_ui_name:
 				initial_style_idx = 3 + ci
 				break
-	elif manager.textbox_style == 2 or (manager.textbox_position == 1 and manager.textbox_style != 1):
+	elif manager.textbox_style == 2 or manager.textbox_position == 1:
 		initial_style_idx = 2
 	elif manager.textbox_style == 1 or manager.textbox_flat_style:
 		initial_style_idx = 1
@@ -2293,6 +2418,7 @@ func _tab_appearance_and_character() -> void:
 				var picked_name: String = custom_ui_items[custom_idx]["name"]
 				manager.textbox_style = 0
 				manager.textbox_flat_style = false
+				manager.textbox_position = 0
 				manager.custom_ui_name = picked_name
 		manager.save_settings()
 		_apply_theme()
@@ -2302,23 +2428,6 @@ func _tab_appearance_and_character() -> void:
 		_select_settings_tab(_settings_tab)
 	)
 	g.add_child(style_opt)
-
-	# Textbox position (for manual override if desired)
-	var pos_lbl := Label.new()
-	pos_lbl.text = "Textbox Position:"
-	g.add_child(pos_lbl)
-	var pos_opt := OptionButton.new()
-	pos_opt.add_item("Bottom (classic)")
-	pos_opt.add_item("Top (floating)")
-	pos_opt.selected = clampi(manager.textbox_position, 0, 1)
-	pos_opt.item_selected.connect(func(id: int):
-		manager.textbox_position = id
-		manager.save_settings()
-		_apply_textbox_layout()
-		_apply_sprite_layout()
-		_refit_current_slide()
-	)
-	g.add_child(pos_opt)
 
 	# Textbox opacity: disabled / greyed note if in frameless mode
 	var op_label_text := "Textbox Opacity (%):"
@@ -2330,11 +2439,22 @@ func _tab_appearance_and_character() -> void:
 	)
 
 	_add_slider_setting(g, "Textbox Height (px):", 160, 400, float(manager.textbox_height), func(val: float):
-		manager.textbox_height = int(val)
+		manager.set_textbox_height(int(val))
 		_apply_textbox_layout()
 		_apply_sprite_layout()
 		_refit_current_slide()
+	, 10.0, func(v: float) -> String:
+		var iv := int(v)
+		var def_str := " (Default)" if iv == 260 else ""
+		return "%d px (up to %s)%s" % [iv, _height_capacity_desc(iv), def_str]
 	)
+	var h_blank := Control.new()
+	g.add_child(h_blank)
+	var h_hint := Label.new()
+	h_hint.text = "Taller box fits more sentences (up to max, respects paragraph breaks). Original default: 260 px (2 sentences)."
+	h_hint.add_theme_color_override("font_color", Color(0.72, 0.68, 0.60))
+	h_hint.add_theme_font_size_override("font_size", 12)
+	g.add_child(h_hint)
 
 	# Character settings
 	var name_lbl := Label.new()
@@ -2758,13 +2878,15 @@ func _add_path_picker(grid: GridContainer, label_text: String, is_dir: bool, cur
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 10)
+	row.size_flags_horizontal = SIZE_EXPAND_FILL
 	grid.add_child(row)
 
 	var value := Label.new()
 	value.text = current_path.get_file() if not current_path.is_empty() else "(built-in)"
 	value.add_theme_color_override("font_color", WOOD_INK_DIM)
 	value.size_flags_horizontal = SIZE_EXPAND_FILL
-	value.clip_text = true
+	value.custom_minimum_size = Vector2(110, 0)
+	value.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(value)
 
 	# Each picker needs its own undo: picking a folder replaces the built-ins for
@@ -2807,7 +2929,7 @@ func _build_asset_dialog() -> void:
 	_asset_dialog.file_selected.connect(func(p: String): _asset_dialog_setter.call(p))
 	add_child(_asset_dialog)
 
-func _add_slider_setting(grid: GridContainer, label_text: String, min_val: float, max_val: float, current_val: float, on_change: Callable, step: float = 1.0) -> void:
+func _add_slider_setting(grid: GridContainer, label_text: String, min_val: float, max_val: float, current_val: float, on_change: Callable, step: float = 1.0, fmt_fn: Callable = Callable()) -> void:
 	var lbl := Label.new()
 	lbl.text = label_text
 	grid.add_child(lbl)
@@ -2825,12 +2947,16 @@ func _add_slider_setting(grid: GridContainer, label_text: String, min_val: float
 	hbox.add_child(slider)
 	
 	var val_lbl := Label.new()
-	val_lbl.text = _fmt_setting(step, current_val)
-	val_lbl.custom_minimum_size = Vector2(45, 0)
+	var format_val = func(v: float) -> String:
+		if fmt_fn.is_valid():
+			return fmt_fn.call(v)
+		return _fmt_setting(step, v)
+	val_lbl.text = format_val.call(current_val)
+	val_lbl.custom_minimum_size = Vector2(210, 0) if fmt_fn.is_valid() else Vector2(45, 0)
 	hbox.add_child(val_lbl)
 	
 	slider.value_changed.connect(func(v: float):
-		val_lbl.text = _fmt_setting(step, v)
+		val_lbl.text = format_val.call(v)
 		on_change.call(v)
 	)
 	grid.add_child(hbox)
@@ -2949,7 +3075,7 @@ func _populate_recent_list() -> void:
 		btn_read.custom_minimum_size = Vector2(90, 36)
 		btn_read.pressed.connect(func():
 			if FileAccess.file_exists(item["path"]):
-				load_document(item["path"], item["slide_index"])
+				load_document(item["path"], item["slide_index"], item.get("total_slides", -1))
 			else:
 				OS.alert("File not found:\n" + item["path"] + "\n\nIt may have been moved or deleted. Use Remove to drop this entry.", "File Not Found")
 		)
@@ -3150,6 +3276,7 @@ func _show_state(target_state: State) -> void:
 		# that overwrote the origin, Save & Close would bounce into My Media forever.
 		_settings_return_to = previous
 	if target_state == State.READING:
+		_sync_book_to_textbox_height()
 		# drop keyboard focus so Space/Enter belong to the reader, not to the
 		# last-clicked button (it would re-activate on every advance press)
 		var focused := get_viewport().gui_get_focus_owner()
@@ -3388,6 +3515,8 @@ func _ui_texture_path() -> String:
 func _build_progressbar_styles(ui_theme: Theme) -> void:
 	var custom_track: Texture2D = _find_custom_bar_texture(false)
 	var custom_fill: Texture2D = _find_custom_bar_texture(true)
+	var pb_bg: StyleBox = null
+	var pb_fill: StyleBox = null
 
 	if custom_track != null:
 		var sb_track := StyleBoxTexture.new()
@@ -3396,21 +3525,21 @@ func _build_progressbar_styles(ui_theme: Theme) -> void:
 		sb_track.texture_margin_right = 6.0
 		sb_track.texture_margin_top = 4.0
 		sb_track.texture_margin_bottom = 4.0
-		ui_theme.set_stylebox("background", "ProgressBar", sb_track)
+		pb_bg = sb_track
 	else:
 		# Built-in: textured recessed groove using panel texture tinted with theme shade
-		var pb_bg := StyleBoxTexture.new()
-		pb_bg.texture = load(BUILTIN_PANEL_TEX)
-		pb_bg.texture_margin_left = 8.0
-		pb_bg.texture_margin_right = 8.0
-		pb_bg.texture_margin_top = 6.0
-		pb_bg.texture_margin_bottom = 6.0
-		pb_bg.modulate_color = _look["shade"].darkened(0.25)
-		pb_bg.content_margin_left = 2.0
-		pb_bg.content_margin_right = 2.0
-		pb_bg.content_margin_top = 2.0
-		pb_bg.content_margin_bottom = 2.0
-		ui_theme.set_stylebox("background", "ProgressBar", pb_bg)
+		var sbt_bg := StyleBoxTexture.new()
+		sbt_bg.texture = load(BUILTIN_PANEL_TEX)
+		sbt_bg.texture_margin_left = 8.0
+		sbt_bg.texture_margin_right = 8.0
+		sbt_bg.texture_margin_top = 6.0
+		sbt_bg.texture_margin_bottom = 6.0
+		sbt_bg.modulate_color = _look["shade"].darkened(0.25)
+		sbt_bg.content_margin_left = 2.0
+		sbt_bg.content_margin_right = 2.0
+		sbt_bg.content_margin_top = 2.0
+		sbt_bg.content_margin_bottom = 2.0
+		pb_bg = sbt_bg
 
 	if custom_fill != null:
 		var sb_fill := StyleBoxTexture.new()
@@ -3419,17 +3548,25 @@ func _build_progressbar_styles(ui_theme: Theme) -> void:
 		sb_fill.texture_margin_right = 6.0
 		sb_fill.texture_margin_top = 4.0
 		sb_fill.texture_margin_bottom = 4.0
-		ui_theme.set_stylebox("fill", "ProgressBar", sb_fill)
+		pb_fill = sb_fill
 	else:
 		# Built-in: textured inlaid accent bar using panel texture tinted with theme accent
-		var pb_fill := StyleBoxTexture.new()
-		pb_fill.texture = load(BUILTIN_PANEL_TEX)
-		pb_fill.texture_margin_left = 6.0
-		pb_fill.texture_margin_right = 6.0
-		pb_fill.texture_margin_top = 4.0
-		pb_fill.texture_margin_bottom = 4.0
-		pb_fill.modulate_color = _look["accent"]
-		ui_theme.set_stylebox("fill", "ProgressBar", pb_fill)
+		var sbt_fill := StyleBoxTexture.new()
+		sbt_fill.texture = load(BUILTIN_PANEL_TEX)
+		sbt_fill.texture_margin_left = 6.0
+		sbt_fill.texture_margin_right = 6.0
+		sbt_fill.texture_margin_top = 4.0
+		sbt_fill.texture_margin_bottom = 4.0
+		sbt_fill.modulate_color = _look["accent"]
+		pb_fill = sbt_fill
+
+	ui_theme.set_stylebox("background", "ProgressBar", pb_bg)
+	ui_theme.set_stylebox("fill", "ProgressBar", pb_fill)
+
+	if progress_bar != null:
+		progress_bar.add_theme_stylebox_override("background", pb_bg)
+		progress_bar.add_theme_stylebox_override("fill", pb_fill)
+		progress_bar.queue_redraw()
 
 func _find_custom_bar_texture(is_fill: bool) -> Texture2D:
 	for e in _media.get("ui", []):

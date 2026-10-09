@@ -11,8 +11,44 @@ const SUPPORTED_EXTENSIONS := ["txt", "md", "docx", "pdf", "epub"]
 const MAX_ZIP_ENTRIES := 3000
 const MAX_IMAGE_BYTES := 256 * 1024 * 1024
 
-static func parse_file(path: String, sentences_per_slide: int = 2) -> Array[String]:
-	var result := parse_file_with_images(path, sentences_per_slide)
+## Height to sentence count mapping (synced bidirectional).
+## Original defaults: 260 px height = 2 sentences per slide.
+static func sentences_for_height(height: int) -> int:
+	var h := clampi(height, 160, 400)
+	if h < 210:
+		return 1
+	elif h < 285:
+		return 2
+	elif h < 335:
+		return 3
+	elif h < 385:
+		return 4
+	else:
+		return 5
+
+## Sentence count to height mapping (synced bidirectional).
+## Original defaults: 2 sentences = 260 px textbox height.
+static func height_for_sentences(sentences: int) -> int:
+	match clampi(sentences, 1, 5):
+		1: return 160
+		2: return 260
+		3: return 310
+		4: return 360
+		_: return 400
+
+static func max_chars_for_height(height: int) -> int:
+	var h := clampi(height, 160, 400)
+	var t := float(h - 160) / 240.0
+	return int(round(lerp(180.0, 520.0, t)))
+
+static func capacity_for_height(height: int) -> Dictionary:
+	return {
+		"sentences": sentences_for_height(height),
+		"max_chars": max_chars_for_height(height),
+	}
+
+static func parse_file(path: String, sentences_per_slide: int = 2, max_slide_chars: int = MAX_SLIDE_CHARS) -> Array[String]:
+	var result := parse_file_with_images(path, sentences_per_slide, max_slide_chars)
 	var slides: Array[String] = result["slides"]
 	return slides
 
@@ -23,7 +59,7 @@ static func parse_file(path: String, sentences_per_slide: int = 2) -> Array[Stri
 ## Chapter sources: EPUB table of contents, DOCX Heading styles, or short
 ## "Chapter N"-style lines in plain text. book_start points at the first slide
 ## after Gutenberg boilerplate (-1 when none).
-static func parse_file_with_images(path: String, sentences_per_slide: int = 2) -> Dictionary:
+static func parse_file_with_images(path: String, sentences_per_slide: int = 2, max_slide_chars: int = MAX_SLIDE_CHARS) -> Dictionary:
 	if not FileAccess.file_exists(path):
 		return {"slides": [], "images": {}, "chapters": [], "book_start": -1}
 
@@ -43,7 +79,7 @@ static func parse_file_with_images(path: String, sentences_per_slide: int = 2) -
 		raw_content = read_plain_text(path)
 
 	var heuristic: Array = []
-	var slides := parse_string(raw_content, sentences_per_slide, heuristic)
+	var slides := parse_string(raw_content, sentences_per_slide, heuristic, max_slide_chars)
 	var raw_to_clean := {}
 	var image_map := _map_images_to_slides(slides, images, raw_to_clean)
 	# TOC chapters ride through text markers; the index-based heuristic is only
@@ -234,6 +270,46 @@ static func _mark_docx_headings(xml: String) -> String:
 		out += xml.substr(pos, m.get_start() - pos) + marked
 		pos = m.get_end()
 	return out + xml.substr(pos)
+
+static func probe_epub_cover_image(path: String) -> Image:
+	var reader := ZIPReader.new()
+	if reader.open(path) != OK:
+		return null
+	var files := reader.get_files()
+	if files.size() > MAX_ZIP_ENTRIES:
+		reader.close()
+		return null
+	var cover_file := ""
+	for f in files:
+		var fl := f.to_lower()
+		if fl.contains("cover") and (fl.ends_with(".jpg") or fl.ends_with(".jpeg") or fl.ends_with(".png") or fl.ends_with(".webp")):
+			cover_file = f
+			break
+	if cover_file.is_empty():
+		for f in files:
+			var fl := f.to_lower()
+			if fl.ends_with(".jpg") or fl.ends_with(".jpeg") or fl.ends_with(".png") or fl.ends_with(".webp"):
+				cover_file = f
+				break
+	if cover_file.is_empty():
+		reader.close()
+		return null
+	var data := reader.read_file(cover_file)
+	reader.close()
+	if data.is_empty():
+		return null
+	var img := Image.new()
+	var ext := cover_file.get_extension().to_lower()
+	var err := ERR_FILE_UNRECOGNIZED
+	if ext in ["jpg", "jpeg"]:
+		err = img.load_jpg_from_buffer(data)
+	elif ext == "png":
+		err = img.load_png_from_buffer(data)
+	elif ext == "webp":
+		err = img.load_webp_from_buffer(data)
+	if err == OK and not img.is_empty():
+		return img
+	return null
 
 static func read_epub(path: String, out_images: Array = [], out_toc: Array = []) -> String:
 	var reader := ZIPReader.new()
@@ -461,7 +537,7 @@ static func _sub_numeric_entities(re: RegEx, text: String) -> String:
 	return out
 
 ## out_chapters (optional) is filled with {slide, title} for detected chapter headings
-static func parse_string(raw_text: String, sentences_per_slide: int = 2, out_chapters: Array = []) -> Array[String]:
+static func parse_string(raw_text: String, sentences_per_slide: int = 2, out_chapters: Array = [], max_slide_chars: int = MAX_SLIDE_CHARS) -> Array[String]:
 	var slides: Array[String] = []
 	if raw_text.strip_edges().is_empty():
 		return slides
@@ -505,7 +581,7 @@ static func parse_string(raw_text: String, sentences_per_slide: int = 2, out_cha
 			continue
 
 		# Split paragraph into sentences
-		var sentences := _split_into_sentences(p)
+		var sentences := _split_into_sentences(p, max_slide_chars)
 		
 		# Group sentences into slides according to sentences_per_slide
 		var current_chunk := ""
@@ -520,7 +596,7 @@ static func parse_string(raw_text: String, sentences_per_slide: int = 2, out_cha
 				current_chunk = sentence
 				count = 1
 			elif count + 1 > sentences_per_slide \
-					or current_chunk.length() + sentence.length() + 1 > MAX_SLIDE_CHARS:
+					or current_chunk.length() + sentence.length() + 1 > max_slide_chars:
 				# flush BEFORE appending, so a slide never overshoots the cap by a whole sentence
 				slides.append(current_chunk)
 				current_chunk = sentence
@@ -571,7 +647,7 @@ const _CLOSERS := ["\"", "'", "”", "’", ")", "]", "}"]
 const _CLAUSE_BREAKS := [";", ":"]
 const _QUOTE_CHARS := ["\"", "“", "”"]
 
-static func _split_into_sentences(text: String) -> Array[String]:
+static func _split_into_sentences(text: String, max_slide_chars: int = MAX_SLIDE_CHARS) -> Array[String]:
 	var result: Array[String] = []
 	var len_text := text.length()
 	var buffer := ""
@@ -633,7 +709,7 @@ static func _split_into_sentences(text: String) -> Array[String]:
 		
 	var capped: Array[String] = []
 	for s in result:
-		capped.append_array(_break_at_clause(s, MAX_SLIDE_CHARS))
+		capped.append_array(_break_at_clause(s, max_slide_chars))
 	return capped
 
 ## Commits a sentence, except a dialogue tag: after a closed quote ("...!" he said)
