@@ -10,13 +10,26 @@ release/
 *.tar.gz
 *.exe
 
+# User asset folders (managed by the app, not tracked in repo)
+My Backgrounds/
+My Books/
+My Fonts/
+My Sounds/
+My Sprites/
+My UI/
+
+# Agent skills & tool metadata
+.zcode/
+.zcodeignore
+skills-lock.json
+.superpowers/
+.kilo/
+
 # Temporary, log, and scratch files
 *.tmp
 *.log
 *.bak
 verify_log.txt
-.superpowers/
-.kilo/
 
 # In-app updater staging files
 apply_update.cmd
@@ -29,17 +42,5 @@ Desktop.ini
 .vs/
 .vscode/
 .idea/
-
-# User asset folders: ignore all user files, keep folder structure via .gdignore
-My Backgrounds/*
-!My Backgrounds/.gdignore
-My Books/*
-!My Books/.gdignore
-My Fonts/*
-!My Fonts/.gdignore
-My Sounds/*
-!My Sounds/.gdignore
-My Sprites/*
-!My Sprites/.gdignore
-My UI/*
-!My UI/.gdignore
+.editorconfig
+.gitattributes
