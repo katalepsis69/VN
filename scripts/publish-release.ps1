@@ -140,11 +140,13 @@ foreach ($dll in @("pdfium.dll", "pdfium-gde.windows.template_release.x86_64.dll
     }
 }
 
-# Include user folders structure
+# Include user folders structure (only bundle .gdignore placeholders, respecting .gitignore by excluding personal/user files)
 foreach ($folder in @("My Backgrounds", "My Books", "My Fonts", "My Sounds", "My Sprites", "My UI")) {
-    $srcFolder = Join-Path $rootDir $folder
-    if (Test-Path $srcFolder) {
-        Copy-Item $srcFolder -Destination $tempPackageDir -Recurse
+    $destFolder = Join-Path $tempPackageDir $folder
+    New-Item -ItemType Directory -Path $destFolder -Force | Out-Null
+    $srcGdignore = Join-Path (Join-Path $rootDir $folder) ".gdignore"
+    if (Test-Path $srcGdignore) {
+        Copy-Item $srcGdignore -Destination $destFolder -Force
     }
 }
 
