@@ -625,7 +625,7 @@ func _fit_font_size(text: String, width: float, height: float) -> int:
 	var font: Font = dialogue_label.get_theme_font("normal_font")
 	if text.is_empty() or font == null or width < 40.0 or height < 24.0:
 		return max_size
-	var floor_size: int = maxi(12, int(max_size * 0.5))
+	var floor_size: int = maxi(14, int(max_size * 0.6))
 	for s in range(max_size, floor_size, -1):
 		if _text_block_height(font, text, width, s) <= height:
 			return s
@@ -1492,7 +1492,6 @@ func _build_main_menu() -> void:
 	subtitle.add_theme_font_size_override("font_size", 14)
 	vbox.add_child(subtitle)
 
-	# --- Update notification banner (hidden by default) ---
 	update_banner = PanelContainer.new()
 	update_banner.visible = false
 	update_banner.custom_minimum_size = Vector2(0, 36)
@@ -2169,15 +2168,11 @@ func _select_settings_tab(idx: int) -> void:
 		settings_grid.remove_child(child)
 		child.queue_free()
 	match idx:
-		0: _tab_reading()
-		1: _tab_look()
-		2: _tab_textbox()
-		3: _tab_character()
-		4: _tab_stimulation()
-		5: _tab_my_art()
-		6: _tab_sound()
+		0: _tab_reading_and_sound()
+		1: _tab_appearance_and_character()
+		2: _tab_custom_art()
 
-func _tab_reading() -> void:
+func _tab_reading_and_sound() -> void:
 	var g := settings_grid
 	_add_slider_setting(g, "Typewriter Speed (chars/sec, 120 = instant):", 15, 120, manager.typewriter_speed, func(val: float):
 		manager.typewriter_speed = val
@@ -2192,6 +2187,12 @@ func _tab_reading() -> void:
 		manager.font_size = int(val)
 		_refit_current_slide()
 	)
+	_add_toggle_setting(g, "Interface Sounds (buttons and text):", manager.sound_enabled, func(toggled: bool):
+		manager.sound_enabled = toggled
+	)
+	_add_slider_setting(g, "Sound Volume:", 0.0, 1.0, manager.sound_volume, func(val: float):
+		manager.sound_volume = val
+	, 0.05)
 
 	# App Version & Update check
 	var cur_ver: String = updater.CURRENT_VERSION if updater != null else "1.0"
@@ -2217,41 +2218,94 @@ func _tab_reading() -> void:
 	check_box.add_child(settings_update_status)
 	g.add_child(check_box)
 
-## Whole-app look picker. Applies live so the owner can flip through looks with
-## the settings screen open; every existing surface restyles because _apply_theme
-## re-runs the theme defaults and _apply_surface_styles re-issues the overrides.
-func _tab_look() -> void:
+func _tab_appearance_and_character() -> void:
 	var g := settings_grid
-	var lbl := Label.new()
-	lbl.text = "App look:"
-	g.add_child(lbl)
-	var opt := OptionButton.new()
+
+	# App look preset
+	var look_lbl := Label.new()
+	look_lbl.text = "App Look (color theme):"
+	g.add_child(look_lbl)
+	var look_opt := OptionButton.new()
 	for l in LOOKS:
-		opt.add_item(String(l["name"]))
-	opt.selected = 0
+		look_opt.add_item(String(l["name"]))
+	look_opt.selected = 0
 	for i in LOOKS.size():
 		if String(LOOKS[i]["name"]) == manager.ui_look:
-			opt.selected = i
-	opt.item_selected.connect(func(id: int):
+			look_opt.selected = i
+	look_opt.item_selected.connect(func(id: int):
 		manager.ui_look = String(LOOKS[id]["name"])
 		manager.save_settings()
 		_look = _current_look()
 		_apply_theme()
 	)
-	g.add_child(opt)
-	var note := Label.new()
-	note.text = "Recolors the whole app: menu, shelf, buttons and the reading screen. Pick Cozy Wood for the original."
-	note.add_theme_color_override("font_color", WOOD_INK_DIM)
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	note.custom_minimum_size = Vector2(520, 0)
-	g.add_child(note)
-	g.add_child(Control.new())
+	g.add_child(look_opt)
 
-func _tab_textbox() -> void:
-	var g := settings_grid
+	# Reading presentation style (unified textbox style + custom textures)
+	var style_lbl := Label.new()
+	style_lbl.text = "Reading Style (textbox):"
+	g.add_child(style_lbl)
+	var style_opt := OptionButton.new()
+	style_opt.add_item("Classic Wood Box (Bottom)")
+	style_opt.add_item("Clean Flat Box (Bottom)")
+	style_opt.add_item("Higurashi / Floating Text (Top)")
 
+	# Collect custom UI textures from My UI
+	var custom_ui_items: Array = []
+	for e in _media.get("ui", []):
+		if not e.get("builtin", false):
+			custom_ui_items.append(e)
+			style_opt.add_item("Custom: " + String(e["name"]))
+
+	# Resolve current selection
+	var initial_style_idx := 0
+	if not manager.custom_ui_name.is_empty():
+		for ci in custom_ui_items.size():
+			if custom_ui_items[ci]["name"] == manager.custom_ui_name:
+				initial_style_idx = 3 + ci
+				break
+	elif manager.textbox_style == 2 or (manager.textbox_position == 1 and manager.textbox_style != 1):
+		initial_style_idx = 2
+	elif manager.textbox_style == 1 or manager.textbox_flat_style:
+		initial_style_idx = 1
+	else:
+		initial_style_idx = 0
+	style_opt.selected = initial_style_idx
+
+	style_opt.item_selected.connect(func(id: int):
+		if id == 0:
+			manager.textbox_style = 0
+			manager.textbox_flat_style = false
+			manager.textbox_position = 0
+			manager.custom_ui_name = ""
+		elif id == 1:
+			manager.textbox_style = 1
+			manager.textbox_flat_style = true
+			manager.textbox_position = 0
+			manager.custom_ui_name = ""
+		elif id == 2:
+			manager.textbox_style = 2
+			manager.textbox_flat_style = false
+			manager.textbox_position = 1
+			manager.custom_ui_name = ""
+		else:
+			var custom_idx := id - 3
+			if custom_idx >= 0 and custom_idx < custom_ui_items.size():
+				var picked_name: String = custom_ui_items[custom_idx]["name"]
+				manager.textbox_style = 0
+				manager.textbox_flat_style = false
+				manager.custom_ui_name = picked_name
+		manager.save_settings()
+		_apply_theme()
+		_apply_textbox_layout()
+		_apply_sprite_layout()
+		_refit_current_slide()
+		_select_settings_tab(_settings_tab)
+	)
+	g.add_child(style_opt)
+
+	# Textbox position (for manual override if desired)
 	var pos_lbl := Label.new()
-	pos_lbl.text = "Textbox position:"
+	pos_lbl.text = "Textbox Position:"
 	g.add_child(pos_lbl)
 	var pos_opt := OptionButton.new()
 	pos_opt.add_item("Bottom (classic)")
@@ -2266,34 +2320,25 @@ func _tab_textbox() -> void:
 	)
 	g.add_child(pos_opt)
 
-	var style_lbl := Label.new()
-	style_lbl.text = "Textbox style:"
-	g.add_child(style_lbl)
-	var style_opt := OptionButton.new()
-	style_opt.add_item("Wooden box")
-	style_opt.add_item("Plain flat")
-	style_opt.add_item("Frameless (floating text)")
-	style_opt.selected = clampi(manager.textbox_style, 0, 2)
-	style_opt.item_selected.connect(func(id: int):
-		manager.textbox_style = id
-		manager.textbox_flat_style = (id == 1)
-		manager.save_settings()
-		_apply_theme()
-	)
-	g.add_child(style_opt)
-
-	_add_slider_setting(g, "Textbox opacity (%):", 40, 100, manager.textbox_opacity * 100.0, func(val: float):
+	# Textbox opacity: disabled / greyed note if in frameless mode
+	var op_label_text := "Textbox Opacity (%):"
+	if manager.textbox_style == 2:
+		op_label_text = "Textbox Opacity (not used in floating mode):"
+	_add_slider_setting(g, op_label_text, 40, 100, manager.textbox_opacity * 100.0, func(val: float):
 		manager.textbox_opacity = val / 100.0
 		_apply_textbox_opacity()
 	)
-	_add_slider_setting(g, "Textbox height (px):", 160, 400, float(manager.textbox_height), func(val: float):
+
+	_add_slider_setting(g, "Textbox Height (px):", 160, 400, float(manager.textbox_height), func(val: float):
 		manager.textbox_height = int(val)
 		_apply_textbox_layout()
-		_apply_sprite_layout() # the band's bottom edge is the textbox top
-		_refit_current_slide() # the box just changed size; the shown slide was fitted to the old one
+		_apply_sprite_layout()
+		_refit_current_slide()
 	)
+
+	# Character settings
 	var name_lbl := Label.new()
-	name_lbl.text = "Character nameplate:"
+	name_lbl.text = "Character Nameplate:"
 	g.add_child(name_lbl)
 	var name_edit := LineEdit.new()
 	name_edit.text = manager.speaker_name
@@ -2304,25 +2349,23 @@ func _tab_textbox() -> void:
 	)
 	g.add_child(name_edit)
 
-func _tab_character() -> void:
-	var g := settings_grid
-	var pos_lbl := Label.new()
-	pos_lbl.text = "Character Position:"
-	g.add_child(pos_lbl)
-	var pos_opt := OptionButton.new()
-	pos_opt.add_item("Left")
-	pos_opt.add_item("Center")
-	pos_opt.add_item("Right")
-	pos_opt.selected = clampi(manager.sprite_position, 0, 2)
-	pos_opt.item_selected.connect(func(id: int):
+	var char_pos_lbl := Label.new()
+	char_pos_lbl.text = "Character Position:"
+	g.add_child(char_pos_lbl)
+	var char_pos_opt := OptionButton.new()
+	char_pos_opt.add_item("Left")
+	char_pos_opt.add_item("Center")
+	char_pos_opt.add_item("Right")
+	char_pos_opt.selected = clampi(manager.sprite_position, 0, 2)
+	char_pos_opt.item_selected.connect(func(id: int):
 		manager.sprite_position = id
 		manager.save_settings()
 		_apply_sprite_layout()
 	)
-	g.add_child(pos_opt)
+	g.add_child(char_pos_opt)
 
 	var portrait_lbl := Label.new()
-	portrait_lbl.text = "Portrait Mode:"
+	portrait_lbl.text = "Portrait Mode (bust only):"
 	g.add_child(portrait_lbl)
 	var portrait_check := CheckBox.new()
 	portrait_check.button_pressed = manager.sprite_portrait
@@ -2336,14 +2379,19 @@ func _tab_character() -> void:
 	_add_toggle_setting(g, "Speaker Bounce on Speech:", manager.character_bounce, func(toggled: bool):
 		manager.character_bounce = toggled
 	)
-	_add_toggle_setting(g, "Reactive Expressions (match the text):", manager.reactive_expressions, func(toggled: bool):
+	_add_toggle_setting(g, "Reactive Expressions (match text):", manager.reactive_expressions, func(toggled: bool):
 		manager.reactive_expressions = toggled
 	)
+	_add_slider_setting(g, "Sprite Change (Every N slides):", 1, 10, manager.sprite_change_freq, func(val: float):
+		manager.sprite_change_freq = int(val)
+	)
+	_add_toggle_setting(g, "Random Sprite Selection:", manager.sprite_change_random, func(toggled: bool):
+		manager.sprite_change_random = toggled
+	)
 
-func _tab_stimulation() -> void:
-	var g := settings_grid
+	# Background settings
 	var fit_lbl := Label.new()
-	fit_lbl.text = "Background fit:"
+	fit_lbl.text = "Background Fit:"
 	g.add_child(fit_lbl)
 	var fit_opt := OptionButton.new()
 	fit_opt.add_item("Auto (wide images fill, rest stay framed)")
@@ -2358,20 +2406,15 @@ func _tab_stimulation() -> void:
 		_apply_bg_fit(menu_bg_rect, menu_bg_rect.texture)
 	)
 	g.add_child(fit_opt)
+
 	_add_slider_setting(g, "Background Change (Every N slides):", 1, 15, manager.bg_change_freq, func(val: float):
 		manager.bg_change_freq = int(val)
 	)
 	_add_toggle_setting(g, "Random Background Selection:", manager.bg_change_random, func(toggled: bool):
 		manager.bg_change_random = toggled
 	)
-	_add_slider_setting(g, "Sprite Expression Change (Every N slides):", 1, 10, manager.sprite_change_freq, func(val: float):
-		manager.sprite_change_freq = int(val)
-	)
-	_add_toggle_setting(g, "Random Sprite Selection:", manager.sprite_change_random, func(toggled: bool):
-		manager.sprite_change_random = toggled
-	)
 
-func _tab_my_art() -> void:
+func _tab_custom_art() -> void:
 	var g := settings_grid
 
 	var menu_lbl := Label.new()
@@ -2382,7 +2425,6 @@ func _tab_my_art() -> void:
 	for e in _media.get("bg", []):
 		if not manager.off_backgrounds.has(e["name"]):
 			menu_opt.add_item(e["name"])
-	# a fresh OptionButton sits at -1 and renders blank; item 0 is the random default
 	menu_opt.selected = 0
 	if manager.menu_bg != "":
 		for i in menu_opt.item_count:
@@ -2399,7 +2441,14 @@ func _tab_my_art() -> void:
 	media_btn.text = "Choose Which Art To Use"
 	media_btn.pressed.connect(func(): _show_state(State.MEDIA))
 	g.add_child(media_btn)
-	g.add_child(Control.new())
+
+	var open_assets := Button.new()
+	open_assets.text = "Open Asset Folders"
+	open_assets.pressed.connect(func():
+		_ensure_asset_folders()
+		OS.shell_open(_asset_base_dir())
+	)
+	g.add_child(open_assets)
 
 	_add_path_picker(g, "Backgrounds Folder:", true, manager.custom_bgs_dir, func(p: String):
 		manager.custom_bgs_dir = p
@@ -2413,29 +2462,17 @@ func _tab_my_art() -> void:
 		_load_default_assets()
 		_update_sprite(true)
 	)
+	_add_path_picker(g, "Custom Textbox UI Folder:", true, manager.custom_ui_dir, func(p: String):
+		manager.custom_ui_dir = p
+		manager.save_settings()
+		_load_default_assets()
+		_apply_theme()
+	)
 	_add_path_picker(g, "Custom Font (.ttf/.otf):", false, manager.custom_font_path, func(p: String):
 		manager.custom_font_path = p
 		manager.save_settings()
 		_apply_theme()
 	)
-
-	var open_assets := Button.new()
-	open_assets.text = "Open Asset Folders"
-	open_assets.pressed.connect(func():
-		_ensure_asset_folders()
-		OS.shell_open(_asset_base_dir())
-	)
-	g.add_child(open_assets)
-	g.add_child(Control.new())
-
-func _tab_sound() -> void:
-	var g := settings_grid
-	_add_toggle_setting(g, "Interface Sounds (buttons and text):", manager.sound_enabled, func(toggled: bool):
-		manager.sound_enabled = toggled
-	)
-	_add_slider_setting(g, "Sound Volume:", 0.0, 1.0, manager.sound_volume, func(val: float):
-		manager.sound_volume = val
-	, 0.05)
 
 # ==============================================================================
 # MY MEDIA (tick which art actually joins the rotation)
@@ -3577,7 +3614,7 @@ func _on_files_dropped(files: PackedStringArray) -> void:
 		return
 	load_document(path, 0)
 
-# --- In-App Updater Handlers ---
+# Updater callbacks
 
 func _on_update_checked(has_update: bool, latest_ver: String, _notes: String, _download_url: String, _html_url: String) -> void:
 	if has_update and update_banner != null:

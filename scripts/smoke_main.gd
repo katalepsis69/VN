@@ -102,7 +102,7 @@ func _init() -> void:
 	# (the sample doc was opened above, so the shelf has one resumable book)
 	assert(main.shelf_panel.size.x > 400, "shelf panel zero-sized")
 	assert(main.hover_strip.size.y >= 60, "hover strip too small")
-	assert(main.spotlight_box.visible and main.spotlight_box.modulate.a == 0.0, "spotlight should be transparent initially")
+	assert(main.spotlight_box.visible and main.spotlight_box.modulate.a == 1.0, "spotlight should show the active book poster")
 	var spine_count := 0
 	for c in main.shelf_row.get_children():
 		if c is Button:
@@ -280,18 +280,18 @@ func _init() -> void:
 	await process_frame
 	var shelf: Array[Dictionary] = main.manager.get_recent_files()
 	if not shelf.is_empty():
-		assert(main.spotlight_box.modulate.a == 0.0, "spotlight should be clear before hover")
+		assert(main.spotlight_box.modulate.a == 1.0, "spotlight should show active book on menu open")
 		var shelf_size_before: Vector2 = main.shelf_panel.size
 		main._show_spot(shelf[0])
 		await process_frame
 		assert(main.spot_title.text == shelf[0]["title"], "hover poster did not update the spotlight")
 		assert(main.spotlight_box.modulate.a == 1.0, "spotlight not visible on hover")
 		assert(main.shelf_panel.size == shelf_size_before, "shelf panel resized on hover: %s vs %s" % [main.shelf_panel.size, shelf_size_before])
-		main._show_spot({})
+		main._show_spot(main._spot_book)
 		await process_frame
-		assert(main.spotlight_box.modulate.a == 0.0, "spotlight not cleared after hover")
+		assert(main.spotlight_box.modulate.a == 1.0, "spotlight remains visible for active book after hover")
 		assert(main.shelf_panel.size == shelf_size_before, "shelf panel resized on exit: %s vs %s" % [main.shelf_panel.size, shelf_size_before])
-		print("Hover poster guard passed (no resize, clears to nothing)")
+		print("Hover poster guard passed (no resize, active book spotlight preserved)")
 
 	# My Books folder exists and is scanned
 	main._ensure_asset_folders()
