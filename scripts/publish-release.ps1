@@ -158,8 +158,13 @@ $token = $env:GITHUB_TOKEN
 
 if ([string]::IsNullOrWhiteSpace($token)) {
     try {
-        $credInput = "protocol=https`nhost=github.com`nusername=katalepsis69`n"
-        $credOutput = $credInput | git credential fill 2>$null | Out-String
+        $tempCredIn = Join-Path $env:TEMP "git_cred_in.txt"
+        $tempCredOut = Join-Path $env:TEMP "git_cred_out.txt"
+        [System.IO.File]::WriteAllText($tempCredIn, "protocol=https`nhost=github.com`nusername=katalepsis69`n`n", [System.Text.Encoding]::ASCII)
+        $proc = Start-Process git -ArgumentList "credential fill" -NoNewWindow -PassThru -RedirectStandardInput $tempCredIn -RedirectStandardOutput $tempCredOut
+        $proc.WaitForExit()
+        $credOutput = Get-Content $tempCredOut -Raw
+        Remove-Item $tempCredIn, $tempCredOut -Force -ErrorAction SilentlyContinue
         if ($credOutput -match "password=(.+)") {
             $token = $matches[1].Trim()
         }
