@@ -2,14 +2,6 @@
 .godot/
 /android/
 
-# Godot source code, scenes, and assets
-addons/
-assets/
-scenes/
-scripts/
-project.godot
-export_presets.cfg
-
 # Build outputs & release archives
 build/
 release/
