@@ -44,3 +44,8 @@ Desktop.ini
 .idea/
 .editorconfig
 .gitattributes
+
+# Local scripts & documentation
+publish-release.bat
+AGENTS.md
+DESIGN.md
