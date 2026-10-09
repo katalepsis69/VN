@@ -107,7 +107,7 @@ const LOOKS := [
 	},
 	{
 		"name": "Ember", "accent": Color("eda45c"),
-		"tint": Color(0.62, 0.50, 0.42), "edge": Color("8a5644"),
+		"tint": Color(0.62, 0.50, 0.42), "edge": Color("96604a"),
 		"face": Color("3a2a20"), "shade": Color("2e241c"),
 		"topbar": Color("241a14e6"), "overlay": Color("2a1e16f2"),
 		"flat": Color(0.17, 0.11, 0.08), "namebg": Color("7a4630"),
@@ -182,7 +182,7 @@ var menu_primary_btn: Button     # CONTINUE — the menu's one accent-filled but
 var settings_save_btn: Button    # SAVE & CLOSE — the settings screen's primary
 
 # Settings tabs + My Media picker
-const SETTINGS_TABS := ["Reading", "Look", "Textbox", "Character", "Stimulation", "My Art", "Sound"]
+const SETTINGS_TABS := ["Reading & Sound", "Appearance & Character", "Custom Art & Files"]
 const MEDIA_KINDS := [["bg", "Backgrounds"], ["sprite", "Sprites"], ["sound", "Sounds"], ["font", "Fonts"], ["ui", "UI textures"]]
 var settings_grid: GridContainer
 var settings_tab_btns: Array[Button] = []
@@ -625,7 +625,7 @@ func _fit_font_size(text: String, width: float, height: float) -> int:
 	var font: Font = dialogue_label.get_theme_font("normal_font")
 	if text.is_empty() or font == null or width < 40.0 or height < 24.0:
 		return max_size
-	var floor_size: int = maxi(14, int(max_size * 0.6))
+	var floor_size: int = maxi(12, int(max_size * 0.5))
 	for s in range(max_size, floor_size, -1):
 		if _text_block_height(font, text, width, s) <= height:
 			return s
@@ -756,8 +756,13 @@ func _apply_sprite_layout() -> void:
 			sprite_holder.offset_right = -40.0
 	sprite_holder.anchor_top = 0.0
 	sprite_holder.anchor_bottom = 1.0
-	sprite_holder.offset_top = TOP_BAR_H + 8.0
-	sprite_holder.offset_bottom = -(float(manager.textbox_height) + TEXTBOX_GAP)
+	if manager.textbox_position == 1:
+		var top_gap: float = float(mini(manager.textbox_height, 180)) if manager.textbox_style == 2 else float(manager.textbox_height)
+		sprite_holder.offset_top = TOP_BAR_H + 8.0 + top_gap + TEXTBOX_GAP
+		sprite_holder.offset_bottom = -10.0
+	else:
+		sprite_holder.offset_top = TOP_BAR_H + 8.0
+		sprite_holder.offset_bottom = -(float(manager.textbox_height) + TEXTBOX_GAP)
 
 func _apply_reactive_mood(text: String) -> void:
 	var mood := MoodMapper.mood_for(text)
@@ -802,7 +807,12 @@ func _apply_bg_fit(rect: TextureRect, tex: Texture2D) -> void:
 		rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		return
 	var vp := get_viewport().get_visible_rect().size
-	if vp.x < 8.0 or vp.y < 8.0 or tex.get_width() < 1 or tex.get_height() < 1:
+	if DisplayServer.get_name() == "headless" or vp.x < 8.0 or vp.y < 8.0:
+		vp = Vector2(
+			ProjectSettings.get_setting("display/window/size/viewport_width", 1280),
+			ProjectSettings.get_setting("display/window/size/viewport_height", 720)
+		)
+	if tex.get_width() < 1 or tex.get_height() < 1:
 		rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		return
 	var tex_aspect := float(tex.get_width()) / float(tex.get_height())
@@ -1058,7 +1068,7 @@ func _asset_folders_signature() -> String:
 	# Cheap change-detector for the My * folders: file count + newest mtime each
 	var sig := ""
 	var base := _asset_base_dir()
-	for sub in ["My Backgrounds", "My Sprites", "My Sounds", "My Fonts"]:
+	for sub in ["My Backgrounds", "My Sprites", "My Sounds", "My Fonts", "My UI"]:
 		var dp := base.path_join(sub)
 		if not DirAccess.dir_exists_absolute(dp):
 			continue
@@ -1090,7 +1100,17 @@ func _check_asset_folders_changed() -> void:
 	_update_menu_background()
 
 func _apply_textbox_layout() -> void:
-	dialogue_box.offset_top = -float(manager.textbox_height)
+	if manager.textbox_position == 1:
+		dialogue_box.anchor_top = 0.0
+		dialogue_box.anchor_bottom = 0.0
+		dialogue_box.offset_top = TOP_BAR_H + 8.0
+		var box_h: float = float(mini(manager.textbox_height, 180)) if manager.textbox_style == 2 else float(manager.textbox_height)
+		dialogue_box.offset_bottom = TOP_BAR_H + 8.0 + box_h
+	else:
+		dialogue_box.anchor_top = 1.0
+		dialogue_box.anchor_bottom = 1.0
+		dialogue_box.offset_top = -float(manager.textbox_height)
+		dialogue_box.offset_bottom = -20.0
 
 ## Everything the My Media screen lists, built once per asset refresh so the
 ## rotation pool and the picker can never disagree about what exists.
@@ -1183,9 +1203,10 @@ func _load_default_assets() -> void:
 	_media["sprite"] += _scan_images(asset_base.path_join("My Sprites"), false)
 	_media["sound"] = _scan_files(asset_base.path_join("My Sounds"), ["ogg", "wav"], false)
 	_media["font"] = _scan_files(asset_base.path_join("My Fonts"), ["ttf", "otf"], false)
-	# Textbox textures: My UI files first, the bundled panel last, mirroring the
-	# font chain so a ticked custom file beats the built-in row
+	# Textbox textures: My UI files first, custom UI dir, the bundled panel last
 	_media["ui"] = _scan_images(asset_base.path_join("My UI"), false)
+	if not manager.custom_ui_dir.is_empty():
+		_media["ui"] += _scan_images(manager.custom_ui_dir, false)
 	_media["ui"].append({"name": "Cozy wood (built-in)", "builtin": true, "path": BUILTIN_PANEL_TEX})
 	if ResourceLoader.exists("res://assets/fonts/AtkinsonHyperlegible-Regular.ttf"):
 		_media["font"].append({"name": "Atkinson Hyperlegible", "builtin": true, "path": "res://assets/fonts/AtkinsonHyperlegible-Regular.ttf"})
@@ -1393,7 +1414,7 @@ func _build_dialogue_box() -> void:
 	dialogue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	dialogue_label.bbcode_enabled = true
 	dialogue_label.selection_enabled = false
-	dialogue_label.scroll_active = true # last resort: only scrolls if even the smallest fit is too tall
+	dialogue_label.scroll_active = false # zero scrolling guarantee: auto-fitting ensures text always fits
 	dialogue_label.add_theme_font_size_override("normal_font_size", manager.font_size)
 	vbox.add_child(dialogue_label)
 	
@@ -1666,14 +1687,15 @@ func _build_main_menu() -> void:
 	shelf_margin.add_child(shelf_scroll)
 
 	var row_margin := MarginContainer.new()
-	row_margin.add_theme_constant_override("margin_top", 22)
-	row_margin.add_theme_constant_override("margin_bottom", 4)
+	row_margin.add_theme_constant_override("margin_top", 18)
+	row_margin.add_theme_constant_override("margin_bottom", 2)
 	row_margin.size_flags_horizontal = SIZE_EXPAND_FILL
+	row_margin.size_flags_vertical = SIZE_EXPAND_FILL
 	shelf_scroll.add_child(row_margin)
 
 	shelf_row = HBoxContainer.new()
 	shelf_row.size_flags_vertical = SIZE_SHRINK_END
-	shelf_row.add_theme_constant_override("separation", 10)
+	shelf_row.add_theme_constant_override("separation", 8)
 	row_margin.add_child(shelf_row)
 
 	# --- Compact action row (used to be the big button stack) ---
@@ -1790,8 +1812,8 @@ func _populate_book_shelf(animate_drop: bool) -> void:
 func _make_book_spine(item: Dictionary, idx: int, animate_drop: bool) -> Button:
 	var path: String = item["path"]
 	var h := absi(path.md5_text().hash())
-	var w: int = 40 + h % 14
-	var hh: int = 150 + (h >> 4) % 30
+	var w: int = 44 + h % 16
+	var hh: int = 156 + (h >> 4) % 24
 	var finished: bool = item.total_slides > 0 and item.slide_index >= item.total_slides - 1
 	var target_alpha := 1.0 if FileAccess.file_exists(path) else 0.62
 
@@ -1923,7 +1945,7 @@ func _on_hover_grace_timeout() -> void:
 		if child is Control and (child as Control).get_global_rect().has_point(mp):
 			return
 	_set_hover_card({})
-	_show_spot({})
+	_show_spot(_spot_book)
 
 ## Deleting asks first, and the wording says exactly what will happen to the file.
 func _ask_delete() -> void:
@@ -1957,7 +1979,7 @@ func _do_delete() -> void:
 	_populate_book_shelf(false)
 
 ## The book the spotlight shows when nothing is hovered. Hovering a spine
-## previews that book in the spotlight; leaving clears it.
+## previews that book in the spotlight; leaving restores it.
 var _spot_book: Dictionary = {}
 var _spot_shown_path := ""
 var _cover_cache := {}
@@ -1968,7 +1990,7 @@ func _update_spotlight(items: Array[Dictionary]) -> void:
 		if FileAccess.file_exists(item.path):
 			_spot_book = item
 			break
-	_show_spot({})
+	_show_spot(_spot_book)
 
 func _show_spot(spot: Dictionary) -> void:
 	if spot.is_empty():
@@ -2019,7 +2041,8 @@ func _show_spot(spot: Dictionary) -> void:
 		var tr := TextureRect.new()
 		tr.texture = cover_tex
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 		spot_cover.add_child(tr)
 	else:
 		# Generated cover: title initial on the book's spine color
@@ -2226,28 +2249,58 @@ func _tab_look() -> void:
 
 func _tab_textbox() -> void:
 	var g := settings_grid
-	_add_slider_setting(g, "Textbox Opacity (%):", 40, 100, manager.textbox_opacity * 100.0, func(val: float):
+
+	var pos_lbl := Label.new()
+	pos_lbl.text = "Textbox position:"
+	g.add_child(pos_lbl)
+	var pos_opt := OptionButton.new()
+	pos_opt.add_item("Bottom (classic)")
+	pos_opt.add_item("Top (floating)")
+	pos_opt.selected = clampi(manager.textbox_position, 0, 1)
+	pos_opt.item_selected.connect(func(id: int):
+		manager.textbox_position = id
+		manager.save_settings()
+		_apply_textbox_layout()
+		_apply_sprite_layout()
+		_refit_current_slide()
+	)
+	g.add_child(pos_opt)
+
+	var style_lbl := Label.new()
+	style_lbl.text = "Textbox style:"
+	g.add_child(style_lbl)
+	var style_opt := OptionButton.new()
+	style_opt.add_item("Wooden box")
+	style_opt.add_item("Plain flat")
+	style_opt.add_item("Frameless (floating text)")
+	style_opt.selected = clampi(manager.textbox_style, 0, 2)
+	style_opt.item_selected.connect(func(id: int):
+		manager.textbox_style = id
+		manager.textbox_flat_style = (id == 1)
+		manager.save_settings()
+		_apply_theme()
+	)
+	g.add_child(style_opt)
+
+	_add_slider_setting(g, "Textbox opacity (%):", 40, 100, manager.textbox_opacity * 100.0, func(val: float):
 		manager.textbox_opacity = val / 100.0
 		_apply_textbox_opacity()
 	)
-	_add_slider_setting(g, "Textbox Height (px):", 160, 400, float(manager.textbox_height), func(val: float):
+	_add_slider_setting(g, "Textbox height (px):", 160, 400, float(manager.textbox_height), func(val: float):
 		manager.textbox_height = int(val)
 		_apply_textbox_layout()
 		_apply_sprite_layout() # the band's bottom edge is the textbox top
 		_refit_current_slide() # the box just changed size; the shown slide was fitted to the old one
 	)
-	_add_toggle_setting(g, "Plain Textbox Style (no wood):", manager.textbox_flat_style, func(toggled: bool):
-		manager.textbox_flat_style = toggled
-		_apply_theme()
-	)
 	var name_lbl := Label.new()
-	name_lbl.text = "Character Nameplate:"
+	name_lbl.text = "Character nameplate:"
 	g.add_child(name_lbl)
 	var name_edit := LineEdit.new()
 	name_edit.text = manager.speaker_name
 	name_edit.text_changed.connect(func(new_text: String):
 		manager.speaker_name = new_text
 		nameplate_label.text = new_text
+		nameplate_panel.visible = not new_text.strip_edges().is_empty()
 	)
 	g.add_child(name_edit)
 
@@ -3227,16 +3280,25 @@ func _apply_theme() -> void:
 	# the look's tint. A custom texture is dimmed just enough that cream ink keeps
 	# 4.5:1 against its average tone, so a bright or busy file can never make the
 	# book text unreadable; the look tint does the same job for the built-in.
-	if manager.textbox_flat_style:
+	if manager.textbox_style == 2:
+		var box_empty := StyleBoxEmpty.new()
+		box_empty.content_margin_left = 24.0
+		box_empty.content_margin_right = 24.0
+		box_empty.content_margin_top = 20.0
+		box_empty.content_margin_bottom = 16.0
+		dialogue_box.add_theme_stylebox_override("panel", box_empty)
+		_active_textbox_stylebox = box_empty
+		_ui_tex_dim = 1.0
+	elif manager.textbox_style == 1 or manager.textbox_flat_style:
 		var box_flat := StyleBoxFlat.new()
 		box_flat.set_corner_radius_all(12)
 		box_flat.bg_color = Color(_look["flat"], manager.textbox_opacity)
 		box_flat.set_border_width_all(1)
 		box_flat.border_color = _look["edge"].darkened(0.25)
-		box_flat.content_margin_left = 22.0
-		box_flat.content_margin_right = 22.0
-		box_flat.content_margin_top = 18.0
-		box_flat.content_margin_bottom = 18.0
+		box_flat.content_margin_left = 26.0
+		box_flat.content_margin_right = 26.0
+		box_flat.content_margin_top = 26.0
+		box_flat.content_margin_bottom = 22.0
 		dialogue_box.add_theme_stylebox_override("panel", box_flat)
 		_active_textbox_stylebox = box_flat
 		_ui_tex_dim = 1.0
@@ -3255,10 +3317,10 @@ func _textbox_texture_style() -> StyleBoxTexture:
 	sb.texture_margin_right = 30.0
 	sb.texture_margin_top = 22.0
 	sb.texture_margin_bottom = 22.0
-	sb.content_margin_left = 22.0
-	sb.content_margin_right = 22.0
-	sb.content_margin_top = 18.0
-	sb.content_margin_bottom = 18.0
+	sb.content_margin_left = 28.0
+	sb.content_margin_right = 28.0
+	sb.content_margin_top = 28.0
+	sb.content_margin_bottom = 24.0
 	var path := _ui_texture_path()
 	if path == BUILTIN_PANEL_TEX:
 		sb.texture = load(BUILTIN_PANEL_TEX)
@@ -3277,11 +3339,14 @@ func _textbox_texture_style() -> StyleBoxTexture:
 	sb.modulate_color = Color(_ui_tex_dim, _ui_tex_dim, _ui_tex_dim, manager.textbox_opacity)
 	return sb
 
-## First ticked UI texture wins; My UI files come before the built-in row, so a
-## ticked custom file beats the bundled panel. Nothing ticked = built-in.
+## First selected/ticked UI texture wins; My UI files come before the built-in row.
 func _ui_texture_path() -> String:
+	if not manager.custom_ui_name.is_empty():
+		for e in _media.get("ui", []):
+			if e["name"] == manager.custom_ui_name and not manager.off_ui.has(e["name"]):
+				return String(e["path"])
 	for e in _media.get("ui", []):
-		if not manager.off_ui.has(e["name"]):
+		if not e.get("builtin", false) and not manager.off_ui.has(e["name"]):
 			return String(e["path"])
 	return BUILTIN_PANEL_TEX
 
@@ -3329,30 +3394,63 @@ func _apply_textbox_opacity() -> void:
 	if _active_textbox_stylebox == null:
 		_apply_theme()
 		return
-	if manager.textbox_flat_style:
+	if _active_textbox_stylebox is StyleBoxEmpty:
+		return
+	if manager.textbox_style == 1 or manager.textbox_flat_style:
 		var flat := _active_textbox_stylebox as StyleBoxFlat
-		flat.bg_color = Color(_look["flat"], manager.textbox_opacity)
+		if flat != null:
+			flat.bg_color = Color(_look["flat"], manager.textbox_opacity)
 	else:
 		var tex_sb := _active_textbox_stylebox as StyleBoxTexture
-		if _ui_texture_path() == BUILTIN_PANEL_TEX:
-			tex_sb.modulate_color = Color(_look["tint"], manager.textbox_opacity)
-		else:
-			tex_sb.modulate_color = Color(_ui_tex_dim, _ui_tex_dim, _ui_tex_dim, manager.textbox_opacity)
+		if tex_sb != null:
+			if _ui_texture_path() == BUILTIN_PANEL_TEX:
+				tex_sb.modulate_color = Color(_look["tint"], manager.textbox_opacity)
+			else:
+				tex_sb.modulate_color = Color(_ui_tex_dim, _ui_tex_dim, _ui_tex_dim, manager.textbox_opacity)
 
 ## Every wooden surface. Called from _apply_theme: living anywhere else means it
 ## only runs once the reader moves the opacity slider.
 func _apply_surface_styles() -> void:
-	# Nameplate: flat darker plate sitting on the wood
-	var name_style := StyleBoxFlat.new()
-	name_style.set_corner_radius_all(6)
-	name_style.bg_color = _look["namebg"]
-	name_style.content_margin_left = 12.0
-	name_style.content_margin_right = 12.0
-	name_style.content_margin_top = 4.0
-	name_style.content_margin_bottom = 4.0
-	nameplate_panel.add_theme_stylebox_override("panel", name_style)
-	nameplate_label.add_theme_color_override("font_color", WOOD_INK)
-	dialogue_label.add_theme_color_override("default_color", WOOD_INK)
+	# Nameplate & dialogue text styling
+	if manager.textbox_style == 2:
+		# Frameless / floating mode: transparent nameplate with accent text and dark outline
+		var empty_np := StyleBoxEmpty.new()
+		empty_np.content_margin_left = 0.0
+		empty_np.content_margin_right = 0.0
+		empty_np.content_margin_top = 0.0
+		empty_np.content_margin_bottom = 2.0
+		nameplate_panel.add_theme_stylebox_override("panel", empty_np)
+		nameplate_label.add_theme_color_override("font_color", _look["accent"])
+		nameplate_label.add_theme_constant_override("outline_size", 4)
+		nameplate_label.add_theme_color_override("font_outline_color", Color(0.08, 0.06, 0.04, 0.95))
+
+		# High-contrast outline & shadow ensure readable text across bright skies, clouds, or dark scenes
+		dialogue_label.add_theme_color_override("default_color", WOOD_INK)
+		dialogue_label.add_theme_constant_override("outline_size", 4)
+		dialogue_label.add_theme_color_override("font_outline_color", Color(0.08, 0.06, 0.04, 0.95))
+		dialogue_label.add_theme_constant_override("shadow_offset_x", 2)
+		dialogue_label.add_theme_constant_override("shadow_offset_y", 2)
+		dialogue_label.add_theme_color_override("font_shadow_color", Color(0.0, 0.0, 0.0, 0.85))
+		dialogue_label.add_theme_constant_override("shadow_outline_size", 2)
+	else:
+		# Boxed mode (wood or flat):
+		var name_style := StyleBoxFlat.new()
+		name_style.set_corner_radius_all(6)
+		name_style.bg_color = _look["namebg"]
+		name_style.content_margin_left = 12.0
+		name_style.content_margin_right = 12.0
+		name_style.content_margin_top = 4.0
+		name_style.content_margin_bottom = 4.0
+		nameplate_panel.add_theme_stylebox_override("panel", name_style)
+		nameplate_label.add_theme_color_override("font_color", WOOD_INK)
+		nameplate_label.add_theme_constant_override("outline_size", 0)
+
+		dialogue_label.add_theme_color_override("default_color", WOOD_INK)
+		dialogue_label.add_theme_constant_override("outline_size", 0)
+		dialogue_label.add_theme_constant_override("shadow_offset_x", 0)
+		dialogue_label.add_theme_constant_override("shadow_offset_y", 0)
+
+	nameplate_panel.visible = not manager.speaker_name.strip_edges().is_empty()
 
 	# Top bar: flat dark wood strip
 	var bar := StyleBoxFlat.new()
@@ -3465,6 +3563,7 @@ func _apply_surface_styles() -> void:
 
 func _apply_settings_to_ui() -> void:
 	nameplate_label.text = manager.speaker_name
+	nameplate_panel.visible = not manager.speaker_name.strip_edges().is_empty()
 	_refit_current_slide()
 
 func _on_files_dropped(files: PackedStringArray) -> void:

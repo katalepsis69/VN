@@ -7,6 +7,8 @@ extends SceneTree
 func _init() -> void:
 	print("--- Smoke: instantiate main scene ---")
 	DirAccess.make_dir_recursive_absolute("user://test_config")
+	if FileAccess.file_exists("My UI/smoke_panel.png"):
+		DirAccess.remove_absolute("My UI/smoke_panel.png")
 	var scene: PackedScene = load("res://scenes/main.tscn")
 	assert(scene != null, "main.tscn failed to load")
 	var main = scene.instantiate() # untyped: dynamic access to script members
@@ -31,10 +33,23 @@ func _init() -> void:
 	assert(main.sprite_names.size() == main.sprite_textures.size(), "sprite names out of sync")
 	assert(main.menu_bg_rect.size.x > 500, "menu backdrop zero-sized")
 	assert(main.bg_textures.size() > 40, "background pool suspiciously small: %d" % main.bg_textures.size())
-	# Backgrounds show whole (never cropped) with a darkened stretched copy behind
-	assert(main.bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED, "bg not fit-to-screen")
+	# Backgrounds: fit mode is now a decision (auto/fill/fit), not a fixed mode.
+	# The darkened stretched copy behind stays fixed regardless of mode.
+	main.manager.bg_fit_mode = 2
+	main._apply_bg_fit(main.bg_rect, main.bg_rect.texture)
+	assert(main.bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED, "fit mode not applied")
+	main.manager.bg_fit_mode = 1
+	main._apply_bg_fit(main.bg_rect, main.bg_rect.texture)
+	assert(main.bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_COVERED, "fill mode not applied")
+	main.manager.bg_fit_mode = 0
+	var wide := ImageTexture.create_from_image(Image.create_empty(1920, 1080, false, Image.FORMAT_RGBA8))
+	var tall := ImageTexture.create_from_image(Image.create_empty(600, 900, false, Image.FORMAT_RGBA8))
+	main._apply_bg_fit(main.bg_rect, wide)
+	assert(main.bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_COVERED, "auto should fill a 16:9 image")
+	main._apply_bg_fit(main.bg_rect, tall)
+	assert(main.bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED, "auto should frame a portrait image")
+	main._apply_bg_fit(main.bg_rect, main.bg_rect.texture)
 	assert(main.bg_back != null and main.bg_back.stretch_mode == TextureRect.STRETCH_SCALE, "bg backdrop missing")
-	assert(main.menu_bg_rect.stretch_mode == TextureRect.STRETCH_KEEP_ASPECT_CENTERED, "menu bg not fit-to-screen")
 	assert(not ("particles" in main), "floating particles should be gone entirely")
 	print("Layout guard passed: bg=%s sprite=%s pool=%d" % [main.bg_rect.size, main.sprite_holder.size, main.bg_textures.size()])
 
@@ -357,6 +372,100 @@ func _init() -> void:
 	assert(main.spot_cover.get_theme_stylebox("panel") != null, "spotlight cover panel unstyled")
 	assert(not ("particles" in main), "floating particles should be gone entirely")
 	print("Wooden skin guard passed: top bar, overlays, plank, hover strip, primary, textbox")
+
+	# Look presets: switching must recolor real surfaces (whole app), and Cozy
+	# Wood must round-trip exactly (it is the row every DESIGN.md claim is
+	# measured against). The plank modulate assert also pins the audit fix: the
+	# plank shipped untinted (raw light peach) because the modulate was never set.
+	var slate: Dictionary = {}
+	for l in main.LOOKS:
+		if l["name"] == "Slate":
+			slate = l
+	assert(not slate.is_empty(), "Slate look missing from LOOKS")
+	main.manager.ui_look = "Slate"
+	main._look = main._current_look()
+	main._apply_theme()
+	await process_frame
+	var slate_box := main.dialogue_box.get_theme_stylebox("panel") as StyleBoxTexture
+	assert(slate_box.modulate_color == Color(slate["tint"], main.manager.textbox_opacity), "look did not retint the textbox: %s" % [slate_box.modulate_color])
+	var slate_prim := main.menu_primary_btn.get_theme_stylebox("normal") as StyleBoxFlat
+	assert(slate_prim.bg_color == slate["primary"], "look did not recolor the primary button")
+	var slate_bar := main.top_bar.get_theme_stylebox("panel") as StyleBoxFlat
+	assert(slate_bar.bg_color == slate["topbar"], "look did not recolor the top bar")
+	var plank_sb := main.shelf_panel.get_theme_stylebox("panel") as StyleBoxTexture
+	assert(plank_sb.modulate_color == Color(slate["tint"], 1.0), "plank not tinted by the look: %s" % [plank_sb.modulate_color])
+	main.manager.ui_look = "Cozy Wood"
+	main._look = main._current_look()
+	main._apply_theme()
+	await process_frame
+	var cozy_prim := main.menu_primary_btn.get_theme_stylebox("normal") as StyleBoxFlat
+	assert(cozy_prim.bg_color == Color("9c3a2c"), "cozy wood did not round-trip")
+	var cozy_box := main.dialogue_box.get_theme_stylebox("panel") as StyleBoxTexture
+	assert(cozy_box.modulate_color == Color(main.LOOKS[0]["tint"], main.manager.textbox_opacity), "cozy tint did not round-trip")
+	print("Look guard passed (Slate applied and cleared, plank tinted)")
+
+	# My UI: a bright custom panel dropped in the My UI folder is picked up,
+	# dimmed by the readability safeguard, applied, and unticking restores the
+	# built-in panel. The scratch file is removed afterwards.
+	var myui_path: String = main._asset_base_dir().path_join("My UI").path_join("smoke_panel.png")
+	var pim := Image.create_empty(64, 32, false, Image.FORMAT_RGBA8)
+	pim.fill(Color(0.95, 0.9, 0.8))
+	pim.save_png(myui_path)
+	main._load_default_assets()
+	var ui_entry: Dictionary = {}
+	for e in main._media["ui"]:
+		if e["name"] == "smoke_panel":
+			ui_entry = e
+	assert(not ui_entry.is_empty(), "smoke My UI file not scanned: %s" % [main._media["ui"]])
+	main._media_kind = "ui"
+	main._on_media_toggled(true, ui_entry)
+	await process_frame
+	assert(main._ui_tex_dim < 1.0, "bright custom panel was not dimmed: %f" % main._ui_tex_dim)
+	var dim_used: float = main._ui_tex_dim
+	var custom_box := main.dialogue_box.get_theme_stylebox("panel") as StyleBoxTexture
+	assert(custom_box.texture != null and is_equal_approx(custom_box.modulate_color.r, main._ui_tex_dim), "custom panel dim not applied: %s" % [custom_box.modulate_color])
+	assert(main._contrast(main.WOOD_INK, Color(0.95, 0.9, 0.8) * main._ui_tex_dim) >= 4.5, "dimmed custom panel still under 4.5:1")
+	main._on_media_toggled(false, ui_entry)
+	await process_frame
+	var restored_box := main.dialogue_box.get_theme_stylebox("panel") as StyleBoxTexture
+	assert(restored_box.modulate_color == Color(main.LOOKS[0]["tint"], main.manager.textbox_opacity), "built-in panel not restored after untick")
+	DirAccess.remove_absolute(myui_path)
+	main._load_default_assets()
+	print("My UI guard passed (bright panel dimmed to %.2f, builtin restored)" % dim_used)
+
+	# Textbox options: switching position (top/bottom) and style (wooden/flat/frameless)
+	main._show_state(main.State.READING)
+	await process_frame
+
+	# 1. Top position layout
+	main.manager.textbox_position = 1
+	main._apply_textbox_layout()
+	main._apply_sprite_layout()
+	await process_frame
+	assert(main.dialogue_box.anchor_top == 0.0, "dialogue_box anchor_top should be 0.0 in top mode")
+	assert(main.dialogue_box.offset_top == main.TOP_BAR_H + 8.0, "dialogue_box offset_top mismatch in top mode")
+	assert(main.sprite_holder.offset_bottom == -10.0, "sprite_holder should be grounded at bottom in top mode")
+
+	# 2. Frameless style
+	main.manager.textbox_style = 2
+	main._apply_theme()
+	await process_frame
+	assert(main.dialogue_box.get_theme_stylebox("panel") is StyleBoxEmpty, "dialogue_box should use StyleBoxEmpty in frameless mode")
+	assert(main.nameplate_panel.get_theme_stylebox("panel") is StyleBoxEmpty, "nameplate_panel should use StyleBoxEmpty in frameless mode")
+	assert(main.dialogue_label.get_theme_constant("outline_size") == 4, "dialogue_label should have 4px outline in frameless mode")
+
+	# 3. Round-trip back to classic bottom wooden box
+	main.manager.textbox_position = 0
+	main.manager.textbox_style = 0
+	main._apply_textbox_layout()
+	main._apply_sprite_layout()
+	main._apply_theme()
+	await process_frame
+	assert(main.dialogue_box.anchor_top == 1.0, "dialogue_box anchor_top should be 1.0 in bottom mode")
+	assert(main.dialogue_box.offset_top <= -160.0, "dialogue_box offset_top should be bottom-anchored")
+	assert(main.dialogue_box.get_theme_stylebox("panel") is StyleBoxTexture, "dialogue_box should restore StyleBoxTexture")
+	assert(main.dialogue_label.get_theme_constant("outline_size") == 0, "dialogue_label outline should reset in boxed mode")
+	print("Textbox mode guard passed (top floating + frameless round-trip)")
 
 	# Free the scene before quitting so no resources are reported in use at exit
 	root.remove_child(main)

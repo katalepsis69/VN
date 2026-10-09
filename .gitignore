@@ -4,6 +4,7 @@
 
 # Build outputs (binaries are uploaded to GitHub Releases, not git repo)
 build/
+release/
 *.tmp
 .superpowers/
 .kilo/

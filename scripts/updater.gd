@@ -8,7 +8,7 @@ signal download_progress(downloaded: int, total: int, percent: int)
 signal download_finished(success: bool, error_msg: String)
 
 const REPO := "katalepsis69/VN"
-const CURRENT_VERSION := "1.0"
+const CURRENT_VERSION := "1.1"
 
 var _check_http: HTTPRequest
 var _download_http: HTTPRequest

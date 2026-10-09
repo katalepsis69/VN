@@ -248,6 +248,19 @@ func _init() -> void:
 	assert(meta_found, "Book shelf meta (preview/cover) failed to roundtrip!")
 	print("Book shelf meta verified")
 
+	# 3c. Textbox settings persistence: position (top/bottom) and style (wooden/flat/frameless)
+	manager.textbox_position = 1
+	manager.textbox_style = 2
+	manager.save_settings()
+	var mgr2 := ReaderManager.new()
+	mgr2.config_path = TEST_CFG
+	mgr2.load_settings()
+	assert(mgr2.textbox_position == 1 and mgr2.textbox_style == 2, "textbox position/style failed to persist")
+	manager.textbox_position = 0
+	manager.textbox_style = 0
+	manager.save_settings()
+	print("Textbox settings persistence verified")
+
 	# 3c. Crash-safe saves: a half-written config must recover from its .bak
 	manager.save_progress("test://crash_book.txt", "Crash Test", 3, 9)
 	manager.save_progress("test://crash_book.txt", "Crash Test", 4, 9) # 2nd save: 1st is now the .bak
@@ -348,6 +361,79 @@ func _init() -> void:
 		quit(1)
 		return
 	print("cp1252 .txt decoded: ", cp_joined)
+
+	# 5. Looks + readability safeguards
+	# 5a. Every look must clear measured contrast: cream ink on every surface it
+	# can sit on at 4.5:1+, accent and edge at 3:1+ on the dark faces. Computed,
+	# never restated (the DESIGN.md rule that caught the 1.96:1 textbox).
+	var Main := load("res://scripts/main.gd")
+	var panel_base := Color("dd9a79") # panel texture centre average; tint x base = ink surface
+	var look_names := PackedStringArray()
+	for l in Main.LOOKS:
+		var look_name := str(l["name"])
+		assert(not look_names.has(look_name), "duplicate look name: " + look_name)
+		look_names.append(look_name)
+		var tinted := Color(panel_base.r * l["tint"].r, panel_base.g * l["tint"].g, panel_base.b * l["tint"].b)
+		var overlay_opaque := Color(l["overlay"].r, l["overlay"].g, l["overlay"].b, 1.0)
+		var surfaces := {
+			"tinted panel": tinted,
+			"button face": l["face"],
+			"hover strip": l["shade"],
+			"top bar": Color(l["topbar"].r, l["topbar"].g, l["topbar"].b, 1.0),
+			"overlay": overlay_opaque,
+			"flat textbox": Color(l["flat"].r, l["flat"].g, l["flat"].b, 1.0),
+			"nameplate": l["namebg"],
+			"primary button": l["primary"],
+		}
+		for pair in surfaces.keys():
+			var ratio: float = Main._contrast(Main.WOOD_INK, surfaces[pair])
+			assert(ratio >= 4.5, "%s: cream on %s is %.2f:1 (< 4.5)" % [look_name, pair, ratio])
+		var dim_ratio: float = Main._contrast(Main.WOOD_INK_DIM, l["shade"])
+		assert(dim_ratio >= 4.5, "%s: dim ink on hover strip is %.2f:1" % [look_name, dim_ratio])
+		var accent_ratio: float = Main._contrast(l["accent"], overlay_opaque)
+		assert(accent_ratio >= 3.0, "%s: accent on overlay is %.2f:1 (< 3.0)" % [look_name, accent_ratio])
+		var edge_ratio: float = Main._contrast(l["edge"], overlay_opaque)
+		assert(edge_ratio >= 3.0, "%s: edge on overlay is %.2f:1 (< 3.0)" % [look_name, edge_ratio])
+	# The default look must stay the exact pre-looks skin: the literals asserted
+	# by smoke_main and every measured claim in DESIGN.md are this row.
+	assert(Main.LOOKS[0]["name"] == "Cozy Wood" and Main.LOOKS[0]["accent"] == Color("e8a04c") \
+			and Main.LOOKS[0]["tint"] == Color(0.62, 0.58, 0.52) and Main.LOOKS[0]["primary"] == Color("9c3a2c") \
+			and Main.LOOKS[0]["topbar"] == Color("241c14e6") and Main.LOOKS[0]["overlay"] == Color("2a2018f2"),
+			"Cozy Wood must remain the exact legacy palette")
+	print("Looks vetted: %d looks, every contrast pair passes" % Main.LOOKS.size())
+
+	# 5b. Dim safeguard: bright tones get dimmed to 4.5:1, dark tones are untouched
+	var white_dim: float = Main._dim_for(Color("ffffff"))
+	assert(white_dim < 1.0, "white was not dimmed")
+	assert(Main._contrast(Main.WOOD_INK, Color("ffffff") * white_dim) >= 4.5, "dimmed white still under 4.5:1")
+	assert(Main._dim_for(Color("222222")) == 1.0, "dark tone should not be dimmed")
+	print("Dim safeguard verified (white -> %.2f, dark untouched)" % white_dim)
+
+	# 5c. Generated panel texture: dimensions unchanged, centre average pinned to
+	# the pack base so the measured tint claims hold, rounded corners preserved.
+	# Asserting on the imported resource is what the app actually renders.
+	var panel_res: Texture2D = load("res://assets/ui/container_wood.png")
+	assert(panel_res != null, "container_wood.png failed to import")
+	var panel_img := panel_res.get_image()
+	assert(panel_img != null, "container_wood.png has no image data")
+	assert(panel_img.get_width() == 1511 and panel_img.get_height() == 384,
+		"panel texture dimensions changed: %dx%d" % [panel_img.get_width(), panel_img.get_height()])
+	var panel_avg := Color(0, 0, 0)
+	var panel_n := 0
+	var py := 22
+	while py < panel_img.get_height() - 22:
+		var px := 30
+		while px < panel_img.get_width() - 30:
+			panel_avg += panel_img.get_pixel(px, py)
+			panel_n += 1
+			px += 4
+		py += 4
+	panel_avg /= float(panel_n)
+	assert(absf(panel_avg.r - panel_base.r) <= 0.025 and absf(panel_avg.g - panel_base.g) <= 0.025 \
+			and absf(panel_avg.b - panel_base.b) <= 0.025,
+			"panel centre average drifted from #dd9a79: %s" % [panel_avg.to_html(false)])
+	assert(panel_img.get_pixel(2, 2).a < 0.5, "panel corners should be rounded (transparent)")
+	print("Panel texture verified (centre avg #%s, rounded corners)" % [panel_avg.to_html(false)])
 
 	# 7. 2-Digit Version Comparison (Updater)
 	var UpdaterScript = load("res://scripts/updater.gd")

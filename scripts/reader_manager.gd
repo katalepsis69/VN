@@ -26,6 +26,8 @@ var speaker_name: String = "Ginger"
 var reactive_expressions: bool = true
 var sprite_position: int = 1 # 0 left, 1 center, 2 right
 var sprite_portrait: bool = false
+var textbox_position: int = 0 # 0 bottom (classic), 1 top (floating)
+var textbox_style: int = 0 # 0 wooden box, 1 plain flat, 2 frameless (floating text)
 var textbox_opacity: float = 1.0
 var textbox_height: int = 260
 var textbox_flat_style: bool = false
@@ -35,6 +37,8 @@ var bg_fit_mode: int = 0 # 0 auto, 1 always fill, 2 always fit with border
 var custom_sprites_dir: String = ""
 var custom_bgs_dir: String = ""
 var custom_font_path: String = ""
+var custom_ui_dir: String = ""
+var custom_ui_name: String = ""
 
 ## Menu background: "" = random rotation, otherwise a background name to pin.
 var menu_bg: String = ""
@@ -161,15 +165,19 @@ func load_settings() -> void:
 	reactive_expressions = cfg.get_value("settings", "reactive_expressions", reactive_expressions)
 	sprite_position = cfg.get_value("settings", "sprite_position", sprite_position)
 	sprite_portrait = cfg.get_value("settings", "sprite_portrait", sprite_portrait)
+	textbox_position = cfg.get_value("settings", "textbox_position", textbox_position)
+	textbox_flat_style = cfg.get_value("settings", "textbox_flat_style", textbox_flat_style)
+	textbox_style = cfg.get_value("settings", "textbox_style", 1 if textbox_flat_style else 0)
 	textbox_opacity = cfg.get_value("settings", "textbox_opacity", textbox_opacity)
 	textbox_height = cfg.get_value("settings", "textbox_height", textbox_height)
-	textbox_flat_style = cfg.get_value("settings", "textbox_flat_style", textbox_flat_style)
 	ui_look = cfg.get_value("settings", "ui_look", ui_look)
 	bg_fit_mode = cfg.get_value("settings", "bg_fit_mode", bg_fit_mode)
 
 	custom_sprites_dir = cfg.get_value("settings", "custom_sprites_dir", custom_sprites_dir)
 	custom_bgs_dir = cfg.get_value("settings", "custom_bgs_dir", custom_bgs_dir)
 	custom_font_path = cfg.get_value("settings", "custom_font_path", custom_font_path)
+	custom_ui_dir = cfg.get_value("settings", "custom_ui_dir", custom_ui_dir)
+	custom_ui_name = cfg.get_value("settings", "custom_ui_name", custom_ui_name)
 
 	menu_bg = cfg.get_value("settings", "menu_bg", menu_bg)
 	off_backgrounds = PackedStringArray(cfg.get_value("settings", "off_backgrounds", []))
@@ -198,15 +206,19 @@ func save_settings() -> void:
 	cfg.set_value("settings", "reactive_expressions", reactive_expressions)
 	cfg.set_value("settings", "sprite_position", sprite_position)
 	cfg.set_value("settings", "sprite_portrait", sprite_portrait)
+	cfg.set_value("settings", "textbox_position", textbox_position)
+	cfg.set_value("settings", "textbox_style", textbox_style)
+	cfg.set_value("settings", "textbox_flat_style", textbox_style == 1)
 	cfg.set_value("settings", "textbox_opacity", textbox_opacity)
 	cfg.set_value("settings", "textbox_height", textbox_height)
-	cfg.set_value("settings", "textbox_flat_style", textbox_flat_style)
 	cfg.set_value("settings", "ui_look", ui_look)
 	cfg.set_value("settings", "bg_fit_mode", bg_fit_mode)
 
 	cfg.set_value("settings", "custom_sprites_dir", custom_sprites_dir)
 	cfg.set_value("settings", "custom_bgs_dir", custom_bgs_dir)
 	cfg.set_value("settings", "custom_font_path", custom_font_path)
+	cfg.set_value("settings", "custom_ui_dir", custom_ui_dir)
+	cfg.set_value("settings", "custom_ui_name", custom_ui_name)
 
 	cfg.set_value("settings", "menu_bg", menu_bg)
 	cfg.set_value("settings", "off_backgrounds", Array(off_backgrounds))
