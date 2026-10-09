@@ -1,10 +1,45 @@
-# Godot 4+ specific ignores
+# Godot engine caches
 .godot/
 /android/
 
-# Build outputs (binaries are uploaded to GitHub Releases, not git repo)
+# Build outputs & release archives
 build/
 release/
+*.zip
+*.7z
+*.tar.gz
+*.exe
+
+# Temporary, log, and scratch files
 *.tmp
+*.log
+*.bak
+verify_log.txt
 .superpowers/
 .kilo/
+
+# In-app updater staging files
+apply_update.cmd
+VNReader_update.exe
+
+# OS and IDE files
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vs/
+.vscode/
+.idea/
+
+# User asset folders: ignore all user files, keep folder structure via .gdignore
+My Backgrounds/*
+!My Backgrounds/.gdignore
+My Books/*
+!My Books/.gdignore
+My Fonts/*
+!My Fonts/.gdignore
+My Sounds/*
+!My Sounds/.gdignore
+My Sprites/*
+!My Sprites/.gdignore
+My UI/*
+!My UI/.gdignore

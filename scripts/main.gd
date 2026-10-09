@@ -2698,8 +2698,13 @@ func _on_media_toggled(on: bool, e: Dictionary) -> void:
 			for other in _media.get(_media_kind, []):
 				if other["name"] != e["name"] and not off.has(other["name"]):
 					off.append(other["name"])
+		if _media_kind == "ui":
+			manager.custom_ui_name = e["name"]
+			manager.textbox_style = 0
 	elif not off.has(e["name"]):
 		off.append(e["name"])
+		if _media_kind == "ui" and manager.custom_ui_name == e["name"]:
+			manager.custom_ui_name = ""
 	_set_off_list(_media_kind, off)
 	manager.save_settings()
 	# Re-derive the pools from the inventory already in memory. A full
@@ -3277,13 +3282,7 @@ func _apply_theme() -> void:
 	ui_theme.set_stylebox("grabber_area", "HSlider", slider_fill)
 	ui_theme.set_stylebox("grabber_area_highlight", "HSlider", slider_fill)
 
-	var pb_bg := StyleBoxFlat.new()
-	pb_bg.bg_color = _look["face"].lightened(0.1)
-	pb_bg.set_corner_radius_all(4)
-	var pb_fill: StyleBoxFlat = pb_bg.duplicate()
-	pb_fill.bg_color = _look["accent"]
-	ui_theme.set_stylebox("background", "ProgressBar", pb_bg)
-	ui_theme.set_stylebox("fill", "ProgressBar", pb_fill)
+	_build_progressbar_styles(ui_theme)
 
 	# Font: Settings picker > My Media picks (first ticked) > bundled Atkinson >
 	# engine default. Kaph stays bundled because people who like it can tick it.
@@ -3376,16 +3375,82 @@ func _textbox_texture_style() -> StyleBoxTexture:
 	sb.modulate_color = Color(_ui_tex_dim, _ui_tex_dim, _ui_tex_dim, manager.textbox_opacity)
 	return sb
 
-## First selected/ticked UI texture wins; My UI files come before the built-in row.
+## Selected custom UI texture wins; falls back to the built-in wood panel.
 func _ui_texture_path() -> String:
 	if not manager.custom_ui_name.is_empty():
 		for e in _media.get("ui", []):
 			if e["name"] == manager.custom_ui_name and not manager.off_ui.has(e["name"]):
 				return String(e["path"])
-	for e in _media.get("ui", []):
-		if not e.get("builtin", false) and not manager.off_ui.has(e["name"]):
-			return String(e["path"])
 	return BUILTIN_PANEL_TEX
+
+## Progress bar: textured carved groove + accent fill adapting to App Look,
+## or custom track/fill images if found in My UI.
+func _build_progressbar_styles(ui_theme: Theme) -> void:
+	var custom_track: Texture2D = _find_custom_bar_texture(false)
+	var custom_fill: Texture2D = _find_custom_bar_texture(true)
+
+	if custom_track != null:
+		var sb_track := StyleBoxTexture.new()
+		sb_track.texture = custom_track
+		sb_track.texture_margin_left = 6.0
+		sb_track.texture_margin_right = 6.0
+		sb_track.texture_margin_top = 4.0
+		sb_track.texture_margin_bottom = 4.0
+		ui_theme.set_stylebox("background", "ProgressBar", sb_track)
+	else:
+		# Built-in: textured recessed groove using panel texture tinted with theme shade
+		var pb_bg := StyleBoxTexture.new()
+		pb_bg.texture = load(BUILTIN_PANEL_TEX)
+		pb_bg.texture_margin_left = 8.0
+		pb_bg.texture_margin_right = 8.0
+		pb_bg.texture_margin_top = 6.0
+		pb_bg.texture_margin_bottom = 6.0
+		pb_bg.modulate_color = _look["shade"].darkened(0.25)
+		pb_bg.content_margin_left = 2.0
+		pb_bg.content_margin_right = 2.0
+		pb_bg.content_margin_top = 2.0
+		pb_bg.content_margin_bottom = 2.0
+		ui_theme.set_stylebox("background", "ProgressBar", pb_bg)
+
+	if custom_fill != null:
+		var sb_fill := StyleBoxTexture.new()
+		sb_fill.texture = custom_fill
+		sb_fill.texture_margin_left = 6.0
+		sb_fill.texture_margin_right = 6.0
+		sb_fill.texture_margin_top = 4.0
+		sb_fill.texture_margin_bottom = 4.0
+		ui_theme.set_stylebox("fill", "ProgressBar", sb_fill)
+	else:
+		# Built-in: textured inlaid accent bar using panel texture tinted with theme accent
+		var pb_fill := StyleBoxTexture.new()
+		pb_fill.texture = load(BUILTIN_PANEL_TEX)
+		pb_fill.texture_margin_left = 6.0
+		pb_fill.texture_margin_right = 6.0
+		pb_fill.texture_margin_top = 4.0
+		pb_fill.texture_margin_bottom = 4.0
+		pb_fill.modulate_color = _look["accent"]
+		ui_theme.set_stylebox("fill", "ProgressBar", pb_fill)
+
+func _find_custom_bar_texture(is_fill: bool) -> Texture2D:
+	for e in _media.get("ui", []):
+		if e.get("builtin", false):
+			continue
+		var nm: String = str(e["name"]).to_lower()
+		if is_fill:
+			if nm.contains("fill") or nm.contains("progress") or nm.contains("bar_fill"):
+				if ResourceLoader.exists(String(e["path"])):
+					return load(String(e["path"]))
+				var im := Image.load_from_file(String(e["path"]))
+				if im:
+					return ImageTexture.create_from_image(im)
+		else:
+			if nm.contains("track") or nm.contains("groove") or nm.contains("bar_bg") or nm.contains("empty"):
+				if ResourceLoader.exists(String(e["path"])):
+					return load(String(e["path"]))
+				var im := Image.load_from_file(String(e["path"]))
+				if im:
+					return ImageTexture.create_from_image(im)
+	return null
 
 ## Loads a My UI texture and measures the dimming its average tone needs.
 ## Keyed by mtime so replacing the file invalidates the cached dim.

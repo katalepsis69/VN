@@ -141,7 +141,7 @@ foreach ($dll in @("pdfium.dll", "pdfium-gde.windows.template_release.x86_64.dll
 }
 
 # Include user folders structure
-foreach ($folder in @("My Backgrounds", "My Books", "My Fonts", "My Sounds", "My Sprites")) {
+foreach ($folder in @("My Backgrounds", "My Books", "My Fonts", "My Sounds", "My Sprites", "My UI")) {
     $srcFolder = Join-Path $rootDir $folder
     if (Test-Path $srcFolder) {
         Copy-Item $srcFolder -Destination $tempPackageDir -Recurse
