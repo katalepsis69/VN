@@ -37,6 +37,14 @@ mojibake, BOM plus one bad byte, pages under 20 blocks, three or more columns,
 rotated text, tables, superscript exponents, steeply tilted scans, right-to-left PDF
 word order, and typed zero width joiners.
 
+LATER CHANGE TO THIS AREA (2026-10-10, late): the text pipeline now runs on a worker
+thread behind the loading card, including pastes and re-splits. That does not change any
+result above, but it changes two things an auditor must check: the clipboard text is
+stripped of private-use markers on the main thread BEFORE it is handed to the worker, so
+the order cannot invert; and nothing reachable from the worker may touch a node, a
+Texture, or user://. Category 2 of the current CODE & SYSTEM AUDIT brief is the live
+version of Part 2 below and supersedes it where they differ.
+
 ================================================================
 PART 1: RESEARCH REPORT (verified against primary sources)
 ================================================================
@@ -67,8 +75,11 @@ Additions the first report missed:
   warns that statistical guessing (as browsers do) can misidentify text. This app's
   fingerprint method is a heuristic, and the audit must probe its failure edges.
 
-App status: fixed with the multi-layer byte detector (_decode_bytes: BOM checks,
-UTF-8 probe, mojibake fingerprint, CP1252 fallback). Audit the edges, not the idea.
+App status: fixed with the multi-layer byte detector (_decode_bytes: empty guard, the
+three BOM checks, a no-BOM UTF-16 probe that counts near-zero bytes by parity, UTF-32
+routed to its own decoder, a UTF-8 trial judged against the high-byte count rather than
+the bare presence of a replacement mark, then the CP1252 fallback with the "â€"/"Ã"
+mojibake fingerprint). Audit the edges, not the idea.
 
 CAUSE 2. Missing font glyphs ("tofu" boxes)
 
@@ -83,10 +94,12 @@ Additions the first report missed:
   CJK, and right-to-left scripts (Arabic, Hebrew) are common gaps even with a
   system font fallback on minimal Windows installs.
 - A USER-supplied font (My Fonts picker) that already has its own fallback list
-  will NOT get the SystemFont added by the current code. That path needs an audit.
+  will NOT get the SystemFont added by the current code. DISPROVEN when checked against
+  the code: no font in this app ever arrives with a non-empty fallback list, so the
+  system font always attaches. The live risk is a rebuild dropping it, not the branch.
 
-App status: fixed (SystemFont attached as fallback in _apply_theme). Audit the
-user-font path and the emoji/CJK edge.
+App status: fixed (SystemFont attached as fallback in _apply_theme). Audit whether the
+fallback survives every theme rebuild, and the emoji/CJK edge.
 
 CAUSE 3. Typographic ligatures
 
@@ -201,10 +214,14 @@ edge cases, and cross-format regressions. Do not re-flag the design decisions.
 - Empty file, single-byte file, BOM-only file at every entry point.
 
 2b. Entity decoding (_decode_entities)
-- Named-entity table coverage: check for missing common HTML5 entities (trade,
-  copy, reg, deg, plusmn, ndash, lsquo, rsquo, sbquo, bdquo, dagger, bull, euro,
-  pound, sect, para, middot, laquo, raquo, times, divide, frac12). Report each gap
-  with the character a real book would display raw.
+- Named-entity table coverage: the common set (trade, copy, reg, deg, plusmn, ndash,
+  lsquo, rsquo, sbquo, bdquo, dagger, bull, euro, pound, sect, para, middot, laquo,
+  raquo, times, divide, frac12) is ALREADY in the table; that was this brief's error,
+  corrected in the result block above. The gaps that were real (the structural five,
+  thinsp, curren, brvbar, not, macr, cedil, acute, grave, tilde, superscripts, micro,
+  arrows, math symbols, card suits, Greek) are now added. Audit against the full HTML5
+  set from the code, not against any list in this document, and report each remaining
+  gap with the character a real book would display raw.
 - Double encoding ("&amp;mdash;" must display as "&mdash;"): verify the amp-last
   rule. Triple encoding ("&amp;amp;mdash;"): verify it displays "&amp;mdash;".
 - Numeric edges: &#0; &#x0; &#65533; &#1114111; &#1114112;. Verify no engine
@@ -247,10 +264,13 @@ edge cases, and cross-format regressions. Do not re-flag the design decisions.
   4.7 as used; the official docs confirm after-shaping prevents reflow by shaping
   the full text before hiding glyphs. Verify nothing resets the property later
   (theme changes, style swaps, font swaps).
-- SystemFont fallback: attached only when a FontFile's fallbacks list is empty.
-  Trace the My Fonts picker path: a user font with an existing fallback list never
-  gets the system font. A user font missing common punctuation renders boxes.
-  Report whether that is acceptable or needs an always-append.
+- SystemFont fallback: attached only when a FontFile's fallbacks list is empty. That
+  branch is UNREACHABLE in this app (the result block above): fonts come from
+  load_dynamic_font or an imported .ttf, and both leave fallbacks empty, so the system
+  font always attaches. The live question is not the empty-list branch but whether the
+  fallback survives every theme rebuild: look switch, My Media font toggle, My Fonts
+  picker, window resize, and returning to the menu and back. A user font missing common
+  punctuation renders boxes either way; report whether that is acceptable.
 - Emoji and CJK book text: does the fallback chain cover them, or are they boxes?
 - Typewriter + shrink-to-fit interaction: a 641-char slide shrinks its font; does
   the shaped-layout reveal still hold (no reflow during type)?
@@ -295,8 +315,9 @@ For SUSPECTED findings in this category, the owner can verify with:
   the Paste menu button and check the slide text.
 - PDF two-column check: open a two-column academic PDF from My Books and watch the
   first paragraph of a dense page for interleaved left-right fragments.
-- Headless parser checks go through test_verification.gd sections 1c, 1e, 4b-4f
-  (commands in AGENTS.md).
+- Headless parser checks go through test_verification.gd sections 1c, 1e, 4b-4f and the
+  text-integrity regressions 4h-4o (commands in AGENTS.md). The whole file is 138 asserts
+  across sections 1 to 15, and section 14 parses the owner's serial at real scale.
 - Anything export-sensitive: verify in build/VNReader.exe, not the editor.
 
 ================================================================
@@ -320,5 +341,3 @@ SOURCES CONSULTED
   modes.
 - Ren'Py documentation, Translation chapter: system font must cover ASCII and the
   target language (confirms the fallback-font strategy).
-
-</content>

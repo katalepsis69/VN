@@ -32,6 +32,9 @@ My UI/
 skills-lock.json
 .superpowers/
 .kilo/
+.kilocode/
+.claude/
+.qoder/
 
 # Temporary, log, and scratch files
 *.tmp
@@ -57,3 +60,6 @@ Desktop.ini
 publish-release.bat
 AGENTS.md
 DESIGN.md
+# Ignored for future adds, but this one is still tracked (and already in pushed
+# history): `git rm --cached AUDIT_TEXT_INTEGRITY.md` is what drops it from the repo.
+AUDIT_TEXT_INTEGRITY.md
